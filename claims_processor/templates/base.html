@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Claims Processor{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Claims Processor</div>
+  <nav class="steps">
+    {% set current = step | default(0) %}
+    {% for n, name, ep in [(1,'Documents','index'), (2,'Amounts','receipts'), (3,'Confirm','match'), (4,'Preview','preview'), (5,'Build','build')] %}
+      <a class="stepitem {% if n == current %}on{% elif n < current %}done{% endif %}"
+         href="{{ url_for(ep) }}"><span class="num">{{ n }}</span>{{ name }}</a>
+    {% endfor %}
+  </nav>
+</header>
+<main>
+{% block body %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

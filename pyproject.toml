@@ -1,0 +1,22 @@
+[project]
+name = "claims-processor"
+version = "1.0.0"
+description = "Build a redacted, verified single-PDF claim bundle from receipts and a bank statement"
+requires-python = ">=3.10"
+dependencies = ["pymupdf>=1.24", "flask>=3.0"]
+
+[project.scripts]
+claims-processor = "claims_processor.app:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["claims_processor*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

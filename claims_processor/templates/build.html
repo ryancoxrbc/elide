@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% set step = 5 %}
+{% block body %}
+<h1>Build and verify</h1>
+
+{% if result %}
+  {% if result.ok %}
+    <div class="banner ok">
+      <strong>Verification passed.</strong>
+      Every removed line is gone from the finished PDF, and every claimed line survives.
+    </div>
+  {% else %}
+    <div class="banner bad">
+      <strong>Build failed verification.</strong> {{ result.error }}
+    </div>
+  {% endif %}
+  <div class="filerow">
+    <code>{{ project.bundle_path }}</code>
+    {% if bundle_exists %}<a class="ghost" href="{{ url_for('download') }}" target="_blank">Open bundle</a>{% endif %}
+  </div>
+{% else %}
+  <p class="lede">Writes the redacted statement, assembles the bundle, then checks the finished
+  file for leaks. A bundle that fails verification is reported, never quietly handed over.</p>
+{% endif %}
+
+<form method="post">
+  <div class="card">
+    <label class="check"><input type="checkbox" name="ocr">
+      Also read the rendered pages back with OCR <span class="muted">(slower; catches anything still
+      visible on the page, including text baked into an image)</span></label>
+  </div>
+  <div class="actions">
+    <a class="ghost" href="{{ url_for('preview') }}">&larr; Back</a>
+    <button type="submit">{% if result %}Rebuild{% else %}Build bundle{% endif %}</button>
+  </div>
+</form>
+
+{% if report %}
+  <h2>Report</h2>
+  <p class="muted">Also saved as <code>{{ project.report_path.name }}</code> in the claim folder.</p>
+  <pre class="report">{{ report }}</pre>
+{% endif %}
+{% endblock %}

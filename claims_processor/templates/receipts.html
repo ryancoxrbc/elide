@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+{% set step = 2 %}
+{% block body %}
+<h1>Split each document into its receipts</h1>
+<p class="lede">One PDF can hold several receipts, and one receipt can span several pages &mdash;
+give each its own page range and amount. Click a page (or &#9974;) to read it full-size; rotate
+with &#8635; updates immediately, no need to save first. Amounts found in the text are offered
+as chips.</p>
+
+<form method="post">
+{% for g in groups %}
+  <section class="card sourcecard" data-source="{{ g.source.path }}"
+            data-pagecount="{{ g.source.page_count or 1 }}" data-defaultlabel="{{ g.default_label }}">
+    <div class="sourcehead">
+      <h3>{{ g.source.path }}</h3>
+      <span class="muted">{{ g.pages|length }} page{{ 's' if g.pages|length != 1 else '' }}</span>
+    </div>
+
+    {% if g.pages %}
+      <div class="pagestrip">
+        {% for p in g.pages %}
+          <div class="pagethumb">
+            <button type="button" class="rotatebtn" data-page="{{ p }}"
+                    title="Rotate page {{ p }} 90&deg; anticlockwise">&#8635;</button>
+            <img loading="lazy" src="{{ url_for('doc_page', name=g.source.path, number=p) }}?dpi=130"
+                 alt="page {{ p }}" data-page="{{ p }}">
+            <button type="button" class="expandbtn" data-page="{{ p }}"
+                    title="View page {{ p }} full-size">&#9974;</button>
+            <span class="pageno">{{ p }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Could not render this document.</p>
+    {% endif %}
+
+    <div class="itemrows">
+      {% for row in g.rows %}
+        {% set it = row.item %}
+        <div class="itemrow" data-rid="{{ it.id }}">
+          <div class="rangefields">
+            <label>From
+              <input type="number" min="1" max="{{ g.source.page_count or 1 }}" class="pagein"
+                     name="first::{{ g.source.path }}::{{ it.id }}" value="{{ it.first_page }}">
+            </label>
+            <label>To
+              <input type="number" min="1" max="{{ g.source.page_count or 1 }}" class="pagein"
+                     name="last::{{ g.source.path }}::{{ it.id }}" value="{{ it.last_page }}">
+            </label>
+          </div>
+          <div class="itemmain">
+            <label>Amount claimed
+              <input class="amount" type="text" name="amount::{{ g.source.path }}::{{ it.id }}"
+                     value="{{ it.amount }}" placeholder="0.00" inputmode="decimal" autocomplete="off">
+            </label>
+            {% if row.suggestions %}
+              <div class="chips">
+                {% for s in row.suggestions %}
+                  <button type="button" class="chip" data-amount="{{ s }}">R {{ s }}</button>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <label>Supplier / description
+              <input type="text" name="label::{{ g.source.path }}::{{ it.id }}" value="{{ it.label }}"
+                     placeholder="{{ g.default_label }}">
+            </label>
+            <label>Note <span class="muted">(optional)</span>
+              <input type="text" name="note::{{ g.source.path }}::{{ it.id }}" value="{{ it.note }}">
+            </label>
+          </div>
+          <button type="button" class="ghost removeitem" title="Remove this receipt">&times;</button>
+        </div>
+      {% endfor %}
+    </div>
+
+    {% if g.no_text %}
+      <p class="hint">No text layer in this document (it is a scan), so amounts must be typed.</p>
+    {% endif %}
+
+    <input type="hidden" class="rowlist" name="rows::{{ g.source.path }}"
+           value="{{ g.rows|map(attribute='item.id')|join(',') }}">
+    <button type="button" class="ghost addrow">+ Split off another receipt</button>
+  </section>
+{% endfor %}
+  <div class="actions">
+    <a class="ghost" href="{{ url_for('index') }}">&larr; Back</a>
+    <button type="submit">Find these on the statement &rarr;</button>
+  </div>
+</form>
+
+<div class="lightbox" id="lightbox" hidden>
+  <div class="lightbox-backdrop"></div>
+  <div class="lightbox-panel" role="dialog" aria-modal="true" aria-label="Page preview">
+    <div class="lightbox-head">
+      <span class="lightbox-title" id="lbTitle"></span>
+      <div class="lightbox-tools">
+        <button type="button" class="ghost" id="lbRotate" title="Rotate this page 90&deg; anticlockwise">&#8635; Rotate</button>
+        <button type="button" class="ghost" id="lbClose" title="Close (Esc)">&times; Close</button>
+      </div>
+    </div>
+    <div class="lightbox-body">
+      <button type="button" class="lbnav lbprev" id="lbPrev" title="Previous page (&larr;)">&#8249;</button>
+      <img id="lbImg" alt="">
+      <button type="button" class="lbnav lbnext" id="lbNext" title="Next page (&rarr;)">&#8250;</button>
+    </div>
+    <div class="lightbox-foot"><span id="lbPageLabel"></span></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var rowCounter = 0;
+
+  function field(type, name, value, placeholder) {
+    var el = document.createElement('input');
+    el.type = type;
+    el.name = name;
+    if (value) el.value = value;
+    if (placeholder) el.placeholder = placeholder;
+    return el;
+  }
+
+  function labelled(text, input, hint) {
+    var label = document.createElement('label');
+    label.appendChild(document.createTextNode(text + ' '));
+    if (hint) {
+      var span = document.createElement('span');
+      span.className = 'muted';
+      span.textContent = hint + ' ';
+      label.appendChild(span);
+    }
+    label.appendChild(input);
+    return label;
+  }
+
+  function buildItemRow(sourcePath, pageCount, defaultLabel) {
+    var rid = 'new' + (rowCounter++);
+    var wrap = document.createElement('div');
+    wrap.className = 'itemrow';
+    wrap.dataset.rid = rid;
+
+    var range = document.createElement('div');
+    range.className = 'rangefields';
+    var first = field('number', 'first::' + sourcePath + '::' + rid, '1');
+    first.min = '1'; first.max = String(pageCount); first.className = 'pagein';
+    var last = field('number', 'last::' + sourcePath + '::' + rid, String(pageCount));
+    last.min = '1'; last.max = String(pageCount); last.className = 'pagein';
+    range.appendChild(labelled('From', first));
+    range.appendChild(labelled('To', last));
+
+    var main = document.createElement('div');
+    main.className = 'itemmain';
+    var amount = field('text', 'amount::' + sourcePath + '::' + rid, '', '0.00');
+    amount.className = 'amount';
+    amount.inputMode = 'decimal';
+    amount.autocomplete = 'off';
+    var supplier = field('text', 'label::' + sourcePath + '::' + rid, '', defaultLabel);
+    var note = field('text', 'note::' + sourcePath + '::' + rid, '');
+    main.appendChild(labelled('Amount claimed', amount));
+    main.appendChild(labelled('Supplier / description', supplier));
+    main.appendChild(labelled('Note', note, '(optional)'));
+
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'ghost removeitem';
+    remove.title = 'Remove this receipt';
+    remove.textContent = '×';
+
+    wrap.appendChild(range);
+    wrap.appendChild(main);
+    wrap.appendChild(remove);
+    return wrap;
+  }
+
+  // ---- lightbox: one shared overlay, reused by every source card --------
+  var lb = {
+    el: document.getElementById('lightbox'),
+    img: document.getElementById('lbImg'),
+    title: document.getElementById('lbTitle'),
+    pageLabel: document.getElementById('lbPageLabel'),
+    prevBtn: document.getElementById('lbPrev'),
+    nextBtn: document.getElementById('lbNext'),
+    rotateBtn: document.getElementById('lbRotate'),
+    source: null, pageCount: 0, page: 1, thumbs: null
+  };
+
+  function docPageUrl(source, page, dpi, bust) {
+    return '/doc/' + encodeURIComponent(source) + '/page/' + page + '.png?dpi=' + dpi +
+      (bust ? '&t=' + Date.now() : '');
+  }
+
+  function lbRender(bust) {
+    lb.img.src = docPageUrl(lb.source, lb.page, 220, bust);
+    lb.title.textContent = lb.source;
+    lb.pageLabel.textContent = lb.page + ' / ' + lb.pageCount;
+    lb.prevBtn.disabled = lb.page <= 1;
+    lb.nextBtn.disabled = lb.page >= lb.pageCount;
+  }
+
+  function openLightbox(source, pageCount, page, thumbs) {
+    lb.source = source;
+    lb.pageCount = pageCount;
+    lb.page = parseInt(page, 10);
+    lb.thumbs = thumbs;
+    lb.el.hidden = false;
+    document.body.classList.add('lb-open');
+    lbRender(true); // always fetch fresh, in case a rotation happened since last open
+  }
+
+  function closeLightbox() {
+    lb.el.hidden = true;
+    document.body.classList.remove('lb-open');
+  }
+
+  lb.el.querySelector('.lightbox-backdrop').addEventListener('click', closeLightbox);
+  document.getElementById('lbClose').addEventListener('click', closeLightbox);
+  lb.prevBtn.addEventListener('click', function () {
+    if (lb.page > 1) { lb.page--; lbRender(); }
+  });
+  lb.nextBtn.addEventListener('click', function () {
+    if (lb.page < lb.pageCount) { lb.page++; lbRender(); }
+  });
+  lb.rotateBtn.addEventListener('click', function () {
+    lb.rotateBtn.disabled = true;
+    fetch('/rotate/' + encodeURIComponent(lb.source) + '/' + lb.page, {method: 'POST'})
+      .then(function (r) { return r.json(); })
+      .then(function () {
+        lbRender(true);
+        if (lb.thumbs && lb.thumbs[lb.page]) {
+          lb.thumbs[lb.page].src = docPageUrl(lb.source, lb.page, 130, true);
+        }
+      })
+      .finally(function () { lb.rotateBtn.disabled = false; });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (lb.el.hidden) return;
+    if (e.key === 'Escape') closeLightbox();
+    else if (e.key === 'ArrowLeft') lb.prevBtn.click();
+    else if (e.key === 'ArrowRight') lb.nextBtn.click();
+  });
+
+  document.querySelectorAll('.sourcecard').forEach(function (card) {
+    var sourcePath = card.dataset.source;
+    var pageCount = parseInt(card.dataset.pagecount, 10) || 1;
+    var defaultLabel = card.dataset.defaultlabel || '';
+    var container = card.querySelector('.itemrows');
+    var rowlist = card.querySelector('.rowlist');
+
+    function syncRowList() {
+      var ids = Array.prototype.map.call(
+        container.querySelectorAll('.itemrow'),
+        function (el) { return el.dataset.rid; }
+      );
+      rowlist.value = ids.join(',');
+    }
+
+    function wireRemove(row) {
+      row.querySelector('.removeitem').addEventListener('click', function () {
+        row.remove();
+        syncRowList();
+      });
+    }
+
+    function wireChips(row) {
+      row.querySelectorAll('.chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          row.querySelector('.amount').value = chip.dataset.amount;
+          row.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('on'); });
+          chip.classList.add('on');
+        });
+      });
+    }
+
+    container.querySelectorAll('.itemrow').forEach(function (row) {
+      wireRemove(row);
+      wireChips(row);
+    });
+
+    card.querySelector('.addrow').addEventListener('click', function () {
+      var row = buildItemRow(sourcePath, pageCount, defaultLabel);
+      wireRemove(row);
+      container.appendChild(row);
+      syncRowList();
+      row.querySelector('.amount').focus();
+    });
+
+    // Rotate from the strip: no page reload, just this one thumbnail refreshes.
+    card.querySelectorAll('.rotatebtn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var page = btn.dataset.page;
+        btn.disabled = true;
+        fetch('/rotate/' + encodeURIComponent(sourcePath) + '/' + page, {method: 'POST'})
+          .then(function (r) { return r.json(); })
+          .then(function () {
+            btn.closest('.pagethumb').querySelector('img').src = docPageUrl(sourcePath, page, 130, true);
+          })
+          .finally(function () { btn.disabled = false; });
+      });
+    });
+
+    // Expand: click the thumbnail image or its magnifier to read it full-size.
+    var thumbs = {};
+    card.querySelectorAll('.pagethumb').forEach(function (thumb) {
+      var img = thumb.querySelector('img');
+      var page = img.dataset.page;
+      thumbs[page] = img;
+      var open = function () { openLightbox(sourcePath, pageCount, page, thumbs); };
+      img.addEventListener('click', open);
+      thumb.querySelector('.expandbtn').addEventListener('click', open);
+    });
+  });
+})();
+</script>
+{% endblock %}

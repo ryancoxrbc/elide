@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% set step = 1 %}
+{% block body %}
+<h1>Choose the claim folder</h1>
+<p class="lede">Everything this tool writes &mdash; the redacted statement, the bundle and the
+report &mdash; stays in the folder you pick here.</p>
+
+<div class="card picker">
+  <div class="pickerbar">
+    <div class="crumbs" id="crumbs"></div>
+    <div class="pickeractions">
+      {% if has_native_picker %}
+        <button type="button" class="ghost" id="native">Browse&hellip;</button>
+      {% endif %}
+      <button type="button" class="ghost" id="up" title="Parent folder">&uarr; Up</button>
+    </div>
+  </div>
+
+  <div class="folders" id="folders"></div>
+  <p class="pickererror" id="pickererror" hidden></p>
+  <p class="pickerhint" id="pickerhint" hidden>Waiting on the system dialog. If no window
+    appeared, it may be behind this one &mdash; or just pick the folder from the list above.</p>
+
+  <div class="pickerfoot">
+    <form method="get" class="pathform">
+      <input type="text" name="folder" id="pathinput" value="{{ folder }}"
+             spellcheck="false" autocomplete="off" aria-label="Claim folder path">
+      <button type="submit" id="usebtn">Use this folder</button>
+    </form>
+  </div>
+
+  {% if recents %}
+    <div class="recents">
+      <span class="muted">Recent:</span>
+      {% for r in recents %}
+        <a class="recent" href="{{ url_for('index', folder=r.path) }}"
+           title="{{ r.path }}">{{ r.name }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+{% if pdfs %}
+<form method="post">
+  <input type="hidden" name="folder" value="{{ folder }}">
+  <input type="hidden" name="action" value="save">
+
+  <h2>Which document is the certified statement?</h2>
+  <div class="card">
+    <table class="docs">
+      <thead><tr><th>Statement</th><th>Document</th><th>Pages</th><th>Role</th></tr></thead>
+      <tbody>
+      {% for d in pdfs %}
+        <tr>
+          <td class="mid"><input type="radio" name="statement" value="{{ d.name }}"
+              {% if d.name == statement %}checked{% endif %}></td>
+          <td class="name">{{ d.name }}</td>
+          <td class="mid muted">{{ d.pages or '?' }}</td>
+          <td>
+            <select name="role::{{ d.name }}">
+              <option value="receipt" {% if d.role == 'receipt' %}selected{% endif %}>Receipt</option>
+              <option value="ignore"  {% if d.role == 'ignore'  %}selected{% endif %}>Ignore</option>
+            </select>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">The statement is never rotated or re-rendered &mdash; it goes into the bundle
+    exactly as the bank issued it, minus the removed text. Rotation, and splitting a document into
+    several receipts, happens on the next screen.</p>
+  </div>
+
+  <div class="actions"><button type="submit">Continue to amounts &rarr;</button></div>
+</form>
+{% elif not error %}
+  <p class="muted">No PDFs in this folder yet &mdash; browse to the one holding your receipts.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var crumbs = document.getElementById('crumbs');
+  var folders = document.getElementById('folders');
+  var pathInput = document.getElementById('pathinput');
+  var errBox = document.getElementById('pickererror');
+  var upBtn = document.getElementById('up');
+  var nativeBtn = document.getElementById('native');
+  var current = pathInput.value;
+  var parent = null;
+
+  function showError(message) {
+    errBox.textContent = message || '';
+    errBox.hidden = !message;
+  }
+
+  function render(data) {
+    if (data.error) { showError(data.error); return; }
+    showError('');
+    current = data.path;
+    parent = data.parent;
+    pathInput.value = data.path;
+    upBtn.disabled = !data.parent;
+
+    crumbs.innerHTML = '';
+    data.crumbs.forEach(function (c, i) {
+      if (i) crumbs.appendChild(document.createTextNode('/'));
+      var a = document.createElement('button');
+      a.type = 'button';
+      a.className = 'crumb' + (i === data.crumbs.length - 1 ? ' on' : '');
+      a.textContent = c.name === '/' ? 'root' : c.name;
+      a.onclick = function () { browse(c.path); };
+      crumbs.appendChild(a);
+    });
+
+    folders.innerHTML = '';
+    if (!data.entries.length) {
+      var empty = document.createElement('p');
+      empty.className = 'muted pad';
+      empty.textContent = 'No subfolders here.';
+      folders.appendChild(empty);
+    }
+    data.entries.forEach(function (e) {
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'folder';
+      row.onclick = function () { browse(e.path); };
+
+      var name = document.createElement('span');
+      name.className = 'fname';
+      name.textContent = e.name;
+      row.appendChild(name);
+
+      if (e.has_project) {
+        var started = document.createElement('span');
+        started.className = 'badge started';
+        started.textContent = 'in progress';
+        row.appendChild(started);
+      }
+      if (e.pdfs) {
+        var badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = e.pdfs + ' PDF' + (e.pdfs === 1 ? '' : 's');
+        row.appendChild(badge);
+      }
+      folders.appendChild(row);
+    });
+  }
+
+  function browse(path) {
+    fetch('/api/browse?path=' + encodeURIComponent(path))
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function () { showError('Could not read that folder.'); });
+  }
+
+  upBtn.onclick = function () { if (parent) browse(parent); };
+
+  if (nativeBtn) {
+    nativeBtn.onclick = function () {
+      nativeBtn.disabled = true;
+      nativeBtn.textContent = 'Choosing…';
+      // The dialog is a separate window and can fail to surface (or open behind
+      // the browser). Say so rather than leaving the button spinning in silence.
+      var hint = document.getElementById('pickerhint');
+      var hintTimer = setTimeout(function () { hint.hidden = false; }, 6000);
+      fetch('/api/pick', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path: current})
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.path) { pathInput.value = d.path; document.getElementById('usebtn').click(); }
+          else if (d.error) { showError(d.error); }
+        })
+        .catch(function () { showError('The folder dialog could not be opened.'); })
+        .finally(function () {
+          clearTimeout(hintTimer);
+          hint.hidden = true;
+          nativeBtn.disabled = false;
+          nativeBtn.textContent = 'Browse…';
+        });
+    };
+  }
+
+  browse(current);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% set step = 4 %}
+{% block body %}
+<h1>Preview what will be removed</h1>
+<p class="lede">Red is text that will be permanently deleted. Green outlines the lines you are
+claiming. This is the last look before anything is written.</p>
+
+<form method="post">
+  <div class="card options-grid">
+    <label class="check"><input type="checkbox" name="redact_balance" {% if project.redact_balance_column %}checked{% endif %}>
+      Remove the running balance on every row, including claimed ones</label>
+    <label class="check"><input type="checkbox" name="redact_summary" {% if project.redact_summary_balances %}checked{% endif %}>
+      Remove the closing balances on the summary page</label>
+    <label class="check"><input type="checkbox" name="keep_empty" {% if project.keep_empty_pages %}checked{% endif %}>
+      Keep fully-redacted pages (proves the statement is unbroken)</label>
+    <label class="check"><input type="checkbox" name="include_index" {% if project.include_index_page %}checked{% endif %}>
+      Open the bundle with a generated index page</label>
+    <label class="grow">Output filename
+      <input type="text" name="output_name" value="{{ default_name }}" spellcheck="false"></label>
+  </div>
+
+  {% for v in views %}
+  <section class="card page">
+    <div class="pagehead">
+      <h3>Page {{ v.number }}</h3>
+      <span class="muted">{{ v.account }}</span>
+      <span class="tag keep">{{ v.kept_count }} kept</span>
+      <span class="tag drop">{{ v.removed_count }} removed</span>
+    </div>
+    <div class="sheet" style="aspect-ratio: {{ v.width }} / {{ v.height }};">
+      <img loading="lazy" src="{{ url_for('statement_page_image', number=v.number) }}?dpi=100" alt="statement page {{ v.number }}">
+      {% for b in v.boxes %}
+        <div class="box" style="left:{{ 100 * b.x0 / v.width }}%;top:{{ 100 * b.y0 / v.height }}%;
+             width:{{ 100 * (b.x1 - b.x0) / v.width }}%;height:{{ 100 * (b.y1 - b.y0) / v.height }}%"></div>
+      {% endfor %}
+      {% for k in v.keeps %}
+        <div class="keepbox" style="left:{{ 100 * (k.x0 - 3) / v.width }}%;top:{{ 100 * (k.y0 - 2) / v.height }}%;
+             width:{{ 100 * (k.x1 - k.x0 + 6) / v.width }}%;height:{{ 100 * (k.y1 - k.y0 + 4) / v.height }}%"></div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+
+  <div class="actions">
+    <a class="ghost" href="{{ url_for('match') }}">&larr; Back</a>
+    <button type="submit">Build the bundle &rarr;</button>
+  </div>
+</form>
+{% endblock %}

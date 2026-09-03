@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set step = 3 %}
+{% block body %}
+<h1>Confirm the matching statement line</h1>
+<p class="lede">Nothing is auto-accepted. Even where only one line matches, you confirm it &mdash;
+statements routinely carry repeated amounts.</p>
+
+<form method="post">
+{% for g in groups %}
+  <section class="card match">
+    <div class="claim">
+      <div class="amt">{{ g.amount or '—' }}</div>
+      <div class="who">{{ g.label }}</div>
+      <div class="file muted">{{ g.item.source }} &middot; {{ g.item.page_label }}</div>
+    </div>
+    <div class="options">
+      {% if not g.amount %}
+        <p class="warn">No amount entered — <a href="{{ url_for('receipts') }}">go back and add one</a>.
+        This receipt will be included in the bundle but not tied to a statement line.</p>
+      {% elif g.candidates %}
+        {% for c in g.candidates %}
+          {% set key = c.page ~ ':' ~ c.row_index %}
+          <label class="option {% if g.chosen and g.chosen.page == c.page and g.chosen.row_index == c.row_index %}on{% endif %}">
+            <input type="radio" name="pick::{{ g.item.key }}" value="{{ key }}"
+              {% if g.chosen and g.chosen.page == c.page and g.chosen.row_index == c.row_index %}checked
+              {% elif g.candidates|length == 1 and not g.chosen %}checked{% endif %}>
+            <span class="page">p.{{ c.page }}</span>
+            <span class="date">{{ c.date }}</span>
+            <span class="desc">{{ c.description }}</span>
+            <span class="col {{ c.column }}">{{ c.column }}</span>
+            <span class="val">{{ c.amount }}</span>
+            <span class="acct muted">{{ c.account }}</span>
+          </label>
+        {% endfor %}
+      {% else %}
+        <p class="warn">No statement line moves exactly this amount. Check the figure, or mark it
+        as not found.</p>
+      {% endif %}
+      {% if g.amount %}
+        <label class="option none {% if g.chosen and g.chosen.not_found %}on{% endif %}">
+          <input type="radio" name="pick::{{ g.item.key }}" value="none"
+            {% if g.chosen and g.chosen.not_found %}checked{% endif %}>
+          <span class="desc">Not on this statement &mdash; include the receipt anyway</span>
+        </label>
+      {% endif %}
+    </div>
+  </section>
+{% endfor %}
+  <div class="actions">
+    <a class="ghost" href="{{ url_for('receipts') }}">&larr; Back</a>
+    <button type="submit">Preview the redaction &rarr;</button>
+  </div>
+</form>
+{% endblock %}
