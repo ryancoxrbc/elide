@@ -8,6 +8,21 @@ The redaction is real: text is deleted from the PDF content stream, not covered 
 rectangle that still has selectable text underneath. The pages stay vector PDF — selectable
 text, working search, no flattening to images.
 
+## A starting point, not a finished product
+
+This was built against one bank's certified-statement layout: South African, `R` currency,
+comma decimals, a running **Balance** column, an FSP-registered footer. The statement parsing
+in `claims_processor/statement.py`, the statement-detection scoring in `project.py`, and the
+amount spellings in `models.py` all encode assumptions about that format. A statement from a
+different bank — or a different kind of source document — will likely need those adjusted, and
+the redaction policy in `redact.py` tuned to what *your* claim needs to hide and keep.
+
+That adjustment is the intended workflow. The codebase is deliberately small, typed and
+hermetically tested so you can hand it to your own LLM/agent, describe your statement, and have
+it adapt the parser and redaction rules to your case. Treat this repo as a verified
+foundation — real content-stream redaction, geometry guards, an independent post-build
+check — rather than something to run unchanged.
+
 ## Running it
 
 ```bash
@@ -112,7 +127,14 @@ A build that fails verification is reported as failed. It is never quietly hande
 
 ## Dependencies
 
-`pymupdf` (AGPL-3.0 — fine for private use, worth knowing if you ever redistribute this) and
-`flask`. Optional: `tesseract` on `PATH` for the OCR check, and `zenity` (or `qarma`,
-`kdialog`, `yad`) for the native folder dialog — without one the **Browse…** button is simply
-hidden and the in-page browser does the job.
+`pymupdf` and `flask`. Optional: `tesseract` on `PATH` for the OCR check, and `zenity` (or
+`qarma`, `kdialog`, `yad`) for the native folder dialog — without one the **Browse…** button is
+simply hidden and the in-page browser does the job.
+
+`pymupdf` is AGPL-3.0. That licence covers PyMuPDF itself, not the code in this repo (see
+below). Fine to run and modify privately; if you distribute or host a combined work, mind
+PyMuPDF's terms for that component.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Use it, fork it, adapt it however you like.
