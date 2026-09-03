@@ -36,14 +36,16 @@ builds `.venv` and installs dependencies. The browser opens at `http://127.0.0.1
 Nothing is uploaded anywhere — the server is local and bound to loopback.
 
 **Everything written goes into the claim folder you choose**, never into this project
-directory:
+directory. Only the saved-state file sits at the top level; every generated file goes into a
+`claim_output/` subfolder, so reopening the claim folder never mistakes a previous run's
+output for a source document:
 
-| File | What it is |
+| Path | What it is |
 |---|---|
 | `claim_project.json` | Saved state — reopen the folder later and pick up where you left off |
-| `<statement>_redacted.pdf` | The statement alone, redacted, for inspection |
-| `Claim_Bundle_<folder>.pdf` | The deliverable |
-| `redaction_report.txt` | What was removed, what was kept, and the verification result |
+| `claim_output/<statement>_redacted.pdf` | The statement alone, redacted, for inspection |
+| `claim_output/Claim_Bundle_<folder>.pdf` | The deliverable |
+| `claim_output/redaction_report.txt` | What was removed, what was kept, and the verification result |
 
 ## The five steps
 
@@ -123,7 +125,7 @@ A build that fails verification is reported as failed. It is never quietly hande
 .venv/bin/pytest -q
 ```
 
-61 tests, hermetic — they build a synthetic statement in-process and never touch real claim data.
+64 tests, hermetic — they build a synthetic statement in-process and never touch real claim data.
 
 ## Dependencies
 

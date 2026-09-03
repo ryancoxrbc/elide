@@ -12,6 +12,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .project import OUTPUT_DIR, PROJECT_FILE
+
 # Probing every subfolder for PDFs costs a stat per entry, which is slow on a
 # network mount like pCloudDrive. Cap it - the badge is a convenience, not a
 # guarantee, and folders past the cap simply show no count.
@@ -49,9 +51,16 @@ def list_dir(path: str | Path) -> dict:
     if not target.is_dir():
         return {"error": f"{target} is not a folder.", "path": str(target), "entries": []}
 
+    # Hide our own output subfolder when browsing inside a claim folder, so it
+    # is not offered as somewhere to start a claim.
+    hidden = {OUTPUT_DIR} if (target / PROJECT_FILE).exists() else set()
     try:
         children = sorted(
-            (e for e in os.scandir(target) if e.is_dir() and not e.name.startswith(".")),
+            (
+                e
+                for e in os.scandir(target)
+                if e.is_dir() and not e.name.startswith(".") and e.name not in hidden
+            ),
             key=lambda e: e.name.lower(),
         )
     except PermissionError:

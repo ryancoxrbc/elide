@@ -1,8 +1,11 @@
 """Persistent per-claim state.
 
-Everything lives in ``claim_project.json`` inside the claim folder the user
-selects, so a claim is self-contained and the run is resumable.  The code
-directory never accumulates claim data.
+State lives in ``claim_project.json`` inside the claim folder the user selects,
+so a claim is self-contained and the run is resumable.  Everything the build
+*generates* - the redacted statement, the bundle, the report - goes into a
+``claim_output/`` subfolder instead, so reopening the claim folder never
+mistakes a previous run's output for a source document.  The code directory
+never accumulates claim data.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import pymupdf
 from .models import ClaimItem, Match, Source
 
 PROJECT_FILE = "claim_project.json"
+OUTPUT_DIR = "claim_output"  # where every generated file is written
 
 
 @dataclass
@@ -46,18 +50,27 @@ class ClaimProject:
         return self.abs_path(self.statement) if self.statement else None
 
     @property
+    def output_root(self) -> Path:
+        return self.root / OUTPUT_DIR
+
+    def ensure_output_dir(self) -> Path:
+        """Create ``claim_output/`` and return it. Called before a build writes."""
+        self.output_root.mkdir(exist_ok=True)
+        return self.output_root
+
+    @property
     def redacted_path(self) -> Path:
         stem = Path(self.statement).stem if self.statement else "Statement"
-        return self.root / f"{stem}_redacted.pdf"
+        return self.output_root / f"{stem}_redacted.pdf"
 
     @property
     def bundle_path(self) -> Path:
         name = self.output_name or f"Claim_Bundle_{self.root.name}.pdf"
-        return self.root / name
+        return self.output_root / name
 
     @property
     def report_path(self) -> Path:
-        return self.root / "redaction_report.txt"
+        return self.output_root / "redaction_report.txt"
 
     # -------------------------------------------------------------- sources
 
@@ -188,7 +201,13 @@ def _migrate_legacy_receipts(project: "ClaimProject", root: Path, data: dict) ->
 
 
 def discover_pdfs(folder: str | Path) -> list[str]:
-    """PDFs in the claim folder, excluding anything this tool produced."""
+    """Source PDFs in the claim folder.
+
+    Generated files now live in ``claim_output/``, which this skips for free by
+    only looking at files in the top level. The name check is kept as a fallback
+    for claim folders written by an older version, when the redacted statement
+    and the bundle still sat alongside the sources.
+    """
     root = Path(folder)
     generated = {"_redacted.pdf"}
     out = []

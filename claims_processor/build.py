@@ -29,6 +29,7 @@ def run_build(project: ClaimProject, *, run_ocr: bool = False) -> BuildResult:
     if statement is None or not statement.exists():
         return BuildResult(False, "", error="No certified statement selected.")
 
+    project.ensure_output_dir()
     pages = parse_statement(str(statement))
     kept = project.kept_rows()
 

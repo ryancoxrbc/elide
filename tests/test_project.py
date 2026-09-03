@@ -168,3 +168,17 @@ def test_migrating_a_missing_pdf_falls_back_to_one_page(claim_folder):
     proj = ClaimProject.load(claim_folder)
     assert proj.sources[0].page_count == 1
     assert proj.items[0].last_page == 1
+
+
+def test_generated_paths_all_sit_in_the_output_subfolder(claim_folder):
+    proj = ClaimProject.load(claim_folder)
+    proj.statement = "CertifiedStatements.pdf"
+
+    out = claim_folder / "claim_output"
+    assert proj.output_root == out
+    for path in (proj.redacted_path, proj.bundle_path, proj.report_path):
+        assert path.parent == out
+
+    assert not out.exists()  # nothing created just by asking for a path
+    assert proj.ensure_output_dir() == out
+    assert out.is_dir()

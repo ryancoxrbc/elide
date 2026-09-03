@@ -37,7 +37,7 @@
 
 {% if report %}
   <h2>Report</h2>
-  <p class="muted">Also saved as <code>{{ project.report_path.name }}</code> in the claim folder.</p>
+  <p class="muted">Also saved as <code>{{ project.output_root.name }}/{{ project.report_path.name }}</code> in the claim folder.</p>
   <pre class="report">{{ report }}</pre>
 {% endif %}
 {% endblock %}
