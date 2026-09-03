@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import secrets
+import shutil
+import subprocess
 import webbrowser
 from pathlib import Path
 
@@ -408,6 +410,26 @@ def download():
     return send_file(proj.bundle_path, as_attachment=False)
 
 
+def _open_ui(url: str) -> None:
+    """Open the wizard in a browser.
+
+    On Omarchy, ``omarchy launch webapp`` opens it as a web app - an app-mode
+    browser window with no tab strip or address bar - without adding anything
+    to the app menu. Everywhere else, the default browser in the normal way.
+    """
+    if shutil.which("omarchy"):
+        try:
+            subprocess.Popen(
+                ["omarchy", "launch", "webapp", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+        except OSError:
+            pass  # fall through to the normal browser
+    webbrowser.open(url)
+
+
 def main() -> None:
     import argparse
 
@@ -421,7 +443,7 @@ def main() -> None:
     url = f"http://127.0.0.1:{args.port}/"
     print(f"\n  Claims Processor\n  claim folder : {app.config['START_FOLDER']}\n  open         : {url}\n")
     if not args.no_browser:
-        webbrowser.open(url)
+        _open_ui(url)
     app.run(host="127.0.0.1", port=args.port, debug=False)
 
 

@@ -147,3 +147,33 @@ def test_deleting_every_row_leaves_the_source_with_no_items(client, claim_folder
 
     client.get("/receipts")  # ensure_default_item fires again
     assert len(ClaimProject.load(claim_folder).items_for("scan.pdf")) == 1
+
+
+def test_open_ui_uses_the_omarchy_web_app_launcher_when_present(monkeypatch):
+    from claims_processor import app as app_module
+
+    calls = {}
+    monkeypatch.setattr(app_module.shutil, "which", lambda name: "/usr/bin/omarchy")
+    monkeypatch.setattr(
+        app_module.subprocess, "Popen", lambda cmd, **kw: calls.setdefault("cmd", cmd)
+    )
+    monkeypatch.setattr(
+        app_module.webbrowser, "open", lambda url: calls.setdefault("browser", url)
+    )
+
+    app_module._open_ui("http://127.0.0.1:57311/")
+
+    assert calls["cmd"] == ["omarchy", "launch", "webapp", "http://127.0.0.1:57311/"]
+    assert "browser" not in calls  # the plain browser was not touched
+
+
+def test_open_ui_falls_back_to_the_default_browser_without_omarchy(monkeypatch):
+    from claims_processor import app as app_module
+
+    opened = []
+    monkeypatch.setattr(app_module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(app_module.webbrowser, "open", opened.append)
+
+    app_module._open_ui("http://127.0.0.1:57311/")
+
+    assert opened == ["http://127.0.0.1:57311/"]

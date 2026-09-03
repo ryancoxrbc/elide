@@ -35,6 +35,10 @@ You do not need to know the path up front — the first screen is a folder brows
 builds `.venv` and installs dependencies. The browser opens at `http://127.0.0.1:57311/`.
 Nothing is uploaded anywhere — the server is local and bound to loopback.
 
+On an [Omarchy](https://omarchy.org/) system it opens in an app-mode browser window (via
+`omarchy launch webapp`) — no tab strip, no address bar, and nothing added to your app menu.
+Everywhere else it uses your default browser. `--no-browser` skips opening anything.
+
 **Everything written goes into the claim folder you choose**, never into this project
 directory. Only the saved-state file sits at the top level; every generated file goes into a
 `claim_output/` subfolder, so reopening the claim folder never mistakes a previous run's
