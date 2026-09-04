@@ -74,11 +74,15 @@ def test_ensure_default_item_spans_every_page(claim_folder):
     assert len(proj.items_for(src.path)) == 1
 
 
-def test_two_items_on_the_same_page_get_distinct_keys(claim_folder):
-    """The exact scenario a two-receipts-on-one-scanned-page split needs."""
+def test_two_items_of_one_source_get_distinct_keys(claim_folder):
+    """Identity is the item's own id, not its source and range.
+
+    It has to be: a range moves whenever a neighbouring receipt does, and the
+    match confirmed against an item must move with it.
+    """
     proj = ClaimProject.load(claim_folder)
     a = ClaimItem(source="receipt.pdf", first_page=1, last_page=1, amount="1.00")
-    b = ClaimItem(source="receipt.pdf", first_page=1, last_page=1, amount="2.00")
+    b = ClaimItem(source="receipt.pdf", first_page=2, last_page=2, amount="2.00")
     proj.items += [a, b]
     proj.matches[a.key] = Match(item_key=a.key, page=1, row_index=0, column="debit",
                                  date="", description="", account="", confirmed=True)
@@ -90,6 +94,69 @@ def test_two_items_on_the_same_page_get_distinct_keys(claim_folder):
     assert len(reloaded.items) == 2
     assert len(reloaded.matches) == 2
     assert {i.key for i in reloaded.items} == set(reloaded.matches)
+
+
+def test_loading_separates_receipts_that_claim_the_same_page(claim_folder):
+    """A file written before a page belonged to one receipt only.
+
+    Left alone, the overlap would put page 1 into the bundle twice - so the
+    ranges are laid out again on load, and the matches ride along on the item
+    ids rather than being lost.
+    """
+    proj = ClaimProject.load(claim_folder)
+    proj.sources.append(Source(path="receipt.pdf", page_count=2))
+    a = ClaimItem(source="receipt.pdf", first_page=1, last_page=2, amount="1.00")
+    b = ClaimItem(source="receipt.pdf", first_page=1, last_page=2, amount="2.00")
+    proj.items += [a, b]
+    proj.matches[b.key] = Match(item_key=b.key, page=1, row_index=1, column="debit",
+                                date="", description="", account="", confirmed=True)
+    proj.save()
+
+    reloaded = ClaimProject.load(claim_folder)
+    items = reloaded.items_for("receipt.pdf")
+    assert [(i.first_page, i.last_page) for i in items] == [(1, 1), (2, 2)]
+    assert [i.amount for i in items] == ["1.00", "2.00"]
+    assert set(reloaded.matches) == {b.key}
+
+
+def test_loading_keeps_a_shared_page_that_was_set_by_hand(claim_folder):
+    """The rule is a default, not a cage - a pinned overlap survives a reload."""
+    proj = ClaimProject.load(claim_folder)
+    proj.sources.append(Source(path="receipt.pdf", page_count=2))
+    proj.items += [
+        ClaimItem(source="receipt.pdf", first_page=1, last_page=1, amount="1.00", pinned=True),
+        ClaimItem(source="receipt.pdf", first_page=1, last_page=1, amount="2.00", pinned=True),
+    ]
+    proj.save()
+
+    items = ClaimProject.load(claim_folder).items_for("receipt.pdf")
+    assert [(i.first_page, i.last_page) for i in items] == [(1, 1), (1, 1)]
+    assert all(i.pinned for i in items)
+
+
+def test_a_project_file_from_before_pinning_loads_unpinned(claim_folder):
+    proj = ClaimProject.load(claim_folder)
+    proj.sources.append(Source(path="receipt.pdf", page_count=2))
+    proj.items.append(ClaimItem(source="receipt.pdf", first_page=1, last_page=2))
+    proj.save()
+
+    written = json.loads((claim_folder / "claim_project.json").read_text())
+    for item in written["items"]:
+        del item["pinned"]
+    (claim_folder / "claim_project.json").write_text(json.dumps(written))
+
+    only = ClaimProject.load(claim_folder).items_for("receipt.pdf")[0]
+    assert only.pinned is False
+
+
+def test_loading_leaves_a_source_with_one_receipt_alone(claim_folder):
+    proj = ClaimProject.load(claim_folder)
+    proj.sources.append(Source(path="receipt.pdf", page_count=2))
+    proj.items.append(ClaimItem(source="receipt.pdf", first_page=1, last_page=2))
+    proj.save()
+
+    only = ClaimProject.load(claim_folder).items_for("receipt.pdf")[0]
+    assert (only.first_page, only.last_page) == (1, 2)
 
 
 def test_a_legacy_project_file_migrates_cleanly(claim_folder):

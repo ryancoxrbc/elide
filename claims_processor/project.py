@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pymupdf
 
-from .models import ClaimItem, Match, Source
+from .models import ClaimItem, Match, Source, allocate_pages
 
 PROJECT_FILE = "claim_project.json"
 OUTPUT_DIR = "claim_output"  # where every generated file is written
@@ -96,6 +96,21 @@ class ClaimProject:
         """Claim items that carry a usable amount."""
         return [i for i in self.included_items() if i.value is not None]
 
+    def reallocate_pages(self) -> None:
+        """Re-lay every source's items over its pages, so none overlap.
+
+        Applied on load as well as on save: a project written before receipts
+        owned whole pages can hold two items on one page, which would otherwise
+        put that page into the bundle twice.
+        """
+        ordered: list[ClaimItem] = []
+        for src in self.sources:
+            ordered.extend(allocate_pages(self.items_for(src.path), src.page_count))
+        known = {s.path for s in self.sources}
+        # Items whose source vanished keep their place rather than disappearing
+        # here; step 1 is what prunes them.
+        self.items = ordered + [i for i in self.items if i.source not in known]
+
     def ensure_default_item(self, src: Source) -> None:
         """Give every source at least one claim item spanning all its pages.
 
@@ -155,6 +170,7 @@ class ClaimProject:
             project.sources = [Source(**s) for s in data.get("sources", [])]
             project.items = [ClaimItem(**i) for i in data.get("items", [])]
             project.matches = {k: Match(**v) for k, v in data.get("matches", {}).items()}
+            project.reallocate_pages()
 
         return project
 

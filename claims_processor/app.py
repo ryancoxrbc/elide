@@ -29,7 +29,7 @@ from .filebrowser import (
     remember_folder,
 )
 from .matching import find_candidates, suggest_amounts
-from .models import ClaimItem, Match, Source, format_amount
+from .models import ClaimItem, Match, Source, allocate_pages, format_amount
 from .project import ClaimProject, discover_pdfs, guess_statement
 from .redact import build_plan
 from .render import page_count, page_png
@@ -173,30 +173,39 @@ def receipts():
     a ``rows::<path>`` list of row ids and then ``<field>::<path>::<row id>``
     for each row, so a row added or removed in the browser needs no extra round
     trip: it is only reconciled against ``proj.items`` on submit.
+
+    Ranges are then laid out by ``allocate_pages`` so no two receipts claim the
+    same page unless a row is pinned, which takes its range as typed. The
+    browser does the same as you type, so this normally only confirms what the
+    form already shows - but it is what actually holds the rule, for a submit
+    with scripting off or a hand-posted form.
     """
     proj = project()
 
     if request.method == "POST":
         for src in proj.included_sources():
             row_ids = [r for r in (request.form.get(f"rows::{src.path}") or "").split(",") if r]
+            bound = max(src.page_count, 1)
             new_items = []
             for rid in row_ids:
                 def field(name: str, default: str = "") -> str:
                     return (request.form.get(f"{name}::{src.path}::{rid}") or default).strip()
 
-                bound = max(src.page_count, 1)
                 first = _clamp_int(field("first", "1"), 1, bound, default=1)
                 last = _clamp_int(field("last", str(first)), first, bound, default=first)
 
                 existing = proj.item(rid)
                 item = existing if (existing and existing.source == src.path) else ClaimItem(source=src.path)
                 item.first_page, item.last_page = first, last
+                # A checkbox is absent from the form when it is not ticked.
+                item.pinned = field("pin") == "on"
                 item.amount = field("amount")
                 item.label = field("label")
                 item.note = field("note")
                 new_items.append(item)
 
-            proj.items = [i for i in proj.items if i.source != src.path] + new_items
+            ordered = allocate_pages(new_items, bound)  # in page order, non-overlapping
+            proj.items = [i for i in proj.items if i.source != src.path] + ordered
 
         valid_keys = {i.key for i in proj.items}
         proj.matches = {k: v for k, v in proj.matches.items() if k in valid_keys}
@@ -229,6 +238,26 @@ def _clamp_int(text: str, low: int, high: int, *, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(low, min(value, high))
+
+
+@app.route("/api/amounts/<path:name>")
+def api_amounts(name: str):
+    """Amount chips for one page range.
+
+    Splitting a receipt off changes what its neighbour covers, so the chips
+    have to follow the range - otherwise a figure read off page 3 stays on
+    offer for a receipt that now ends at page 1.
+    """
+    proj = project()
+    src = proj.source(name)
+    if src is None or not proj.abs_path(name).exists():
+        abort(404)
+    bound = max(src.page_count, 1)
+    first = _clamp_int(request.args.get("first", "1"), 1, bound, default=1)
+    last = _clamp_int(request.args.get("last", str(first)), first, bound, default=first)
+    return jsonify(
+        {"amounts": suggest_amounts(str(proj.abs_path(name)), pages=list(range(first, last + 1)))}
+    )
 
 
 @app.route("/rotate/<path:name>/<int:page>", methods=["POST"])

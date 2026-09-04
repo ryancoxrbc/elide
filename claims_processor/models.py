@@ -193,8 +193,8 @@ class Source:
 
     A source is evidence, not a claim. Its pages enter the bundle once, in
     order; what is being claimed is described by the ClaimItems drawn over it.
-    That separation is what lets one PDF hold several receipts, one receipt span
-    several pages, and two receipts share a single scanned page.
+    That separation is what lets one PDF hold several receipts and one receipt
+    span several pages, with the items dividing the pages up between them.
     """
 
     path: str  # relative to the claim folder
@@ -221,11 +221,16 @@ class Source:
 class ClaimItem:
     """One receipt: a run of pages in a source, and the amount claimed for it.
 
-    Ranges may overlap, and two items may name the same page - a scanned sheet
-    showing an invoice beside an unrelated till slip is two claims on one page.
-    Because ranges can coincide, identity cannot be derived from source+range;
-    each item carries its own id instead, assigned once and never recomputed,
-    so it survives the user editing the page range or the amount.
+    By default a receipt owns whole pages and the items of a source divide
+    those pages between them (see ``allocate_pages``), because a page holding
+    two receipts is the rare case and an accidental overlap is the common
+    mistake.  ``pinned`` is the deliberate exception: the range is then taken
+    exactly as typed, which is what lets two till slips scanned onto one sheet
+    both claim that page.
+
+    Identity is not derived from source+range either way, because a range moves
+    whenever a neighbour does; each item carries its own id, assigned once and
+    never recomputed, so it survives the user editing the range or the amount.
     """
 
     source: str
@@ -235,6 +240,8 @@ class ClaimItem:
     label: str = ""
     amount: str = ""  # kept as typed; parsed on demand
     note: str = ""
+    # Set by hand: keep this range as typed, overlaps included.
+    pinned: bool = False
 
     @property
     def key(self) -> str:
@@ -254,6 +261,45 @@ class ClaimItem:
         if self.first_page == self.last_page:
             return f"p.{self.first_page}"
         return f"pp.{self.first_page}-{self.last_page}"
+
+
+def allocate_pages(items: list[ClaimItem], page_count: int) -> list[ClaimItem]:
+    """Lay a source's claim items out over its pages, one receipt per page.
+
+    Items are sorted by where they start and placed in that order, each
+    beginning no earlier than the page after the one before it and leaving a
+    page for every item still to come.  Overlaps therefore resolve by pushing
+    the later item forward and, where that would run off the end, by shrinking
+    the earlier one.  Gaps are allowed: a blank back page belongs to no receipt
+    and simply stays out of the bundle.  The one case that cannot be honoured
+    is more items than pages; the surplus piles onto the last page rather than
+    being silently dropped.
+
+    A ``pinned`` item is left exactly where it was put - clamped to the
+    document, but never moved, and taking no part in the sweep.  That is the
+    escape hatch for a page holding two receipts: pin them and they both keep
+    it.  Automatic items lay themselves out as though the pinned ones were not
+    there, so pinning one row never shunts the rest around.
+
+    The list is returned in page order, and the items are updated in place.
+    """
+    ordered = sorted(items, key=lambda i: (i.first_page, i.last_page))
+    bound = max(page_count, 1)
+    remaining = sum(1 for i in ordered if not i.pinned)
+    cursor = 1
+    for item in ordered:
+        if item.pinned:
+            item.first_page = min(max(item.first_page, 1), bound)
+            item.last_page = min(max(item.last_page, item.first_page), bound)
+            continue
+        # Every automatic item after this one still needs a page of its own.
+        remaining -= 1
+        ceiling = max(1, bound - remaining)
+        first = min(max(item.first_page, cursor), ceiling)
+        last = min(max(item.last_page, first), ceiling)
+        item.first_page, item.last_page = first, last
+        cursor = last + 1
+    return ordered
 
 
 @dataclass

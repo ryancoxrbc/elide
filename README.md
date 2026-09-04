@@ -67,9 +67,24 @@ output for a source document:
    supplier label and a note. Amounts found in that range's own text are offered as chips, best
    guess first. **A source starts with one row spanning every page** — the common case, one PDF
    holding one receipt, needs no extra clicks. Click **+ Split off another receipt** to carve
-   out more: a scanned page holding two till slips becomes two rows both pointing at page 1; an
-   invoice printed across three pages becomes one row spanning all three. Ranges may overlap
-   freely.
+   out more.
+
+   **By default a receipt owns whole pages and no two share one**, because an accidental
+   overlap is the common mistake. Splitting off another receipt therefore takes pages from its
+   neighbour rather than doubling up — on a two-page PDF, one row becomes p.1 and the new row
+   p.2 — and editing a from/to moves the boundary between them, with the neighbours giving way.
+   Each thumbnail is badged with the number of the receipt that owns it, so the split is visible
+   on the pages themselves. A page you leave to no receipt is marked unclaimed and called out:
+   it stays out of the bundle, which is how a blank back page is dropped. The amount chips
+   follow the pages, so a figure read off page 3 stops being offered for a receipt that now ends
+   at page 1.
+
+   **Two receipts on one page is still supported** — it is opt-in rather than the default. Tick
+   **Set by hand** on a row and its range is taken exactly as typed: nothing moves it, and it
+   takes no part in the automatic layout, so pinning one row never shunts the others around.
+   Splitting a single-page PDF does this for you, since a second receipt there can only be a
+   shared one. A shared page is badged with both receipt numbers and called out as appearing
+   once under each in the bundle.
 3. **Confirm** — for each amount, every statement line that moved exactly that sum is listed.
    You pick the right one. Nothing is auto-accepted, even when only one line matches, because
    statements routinely repeat amounts.
@@ -129,7 +144,7 @@ A build that fails verification is reported as failed. It is never quietly hande
 .venv/bin/pytest -q
 ```
 
-64 tests, hermetic — they build a synthetic statement in-process and never touch real claim data.
+96 tests, hermetic — they build a synthetic statement in-process and never touch real claim data.
 
 ## Dependencies
 

@@ -119,7 +119,7 @@ def _write_report(project, plan, summary, result, run_ocr: bool) -> str:
     for item in project.included_items():
         match = project.matches.get(item.key)
         total += item.value or 0
-        amount = format_amount(item.value) if item.value else "(no amount)"
+        amount = format_amount(item.value) if item.value is not None else "(no amount)"
         label = item.label or Path(item.source).stem
         lines.append(f"{amount:>14}  {label}")
         lines.append(f"{'':>14}  file: {item.source} ({item.page_label})")

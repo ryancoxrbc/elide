@@ -3,9 +3,11 @@
 {% block body %}
 <h1>Split each document into its receipts</h1>
 <p class="lede">One PDF can hold several receipts, and one receipt can span several pages &mdash;
-give each its own page range and amount. Click a page (or &#9974;) to read it full-size; rotate
-with &#8635; updates immediately, no need to save first. Amounts found in the text are offered
-as chips.</p>
+give each its own page range and amount. By default a page belongs to one receipt, so splitting
+one off takes pages from its neighbour rather than doubling up; tick <b>Set by hand</b> to keep a
+range exactly as typed, which is how two receipts on one scanned sheet both claim it. Click a page
+(or &#9974;) to read it full-size; rotate with &#8635; updates immediately, no need to save first.
+Amounts found in the text are offered as chips.</p>
 
 <form method="post">
 {% for g in groups %}
@@ -26,10 +28,12 @@ as chips.</p>
                  alt="page {{ p }}" data-page="{{ p }}">
             <button type="button" class="expandbtn" data-page="{{ p }}"
                     title="View page {{ p }} full-size">&#9974;</button>
+            <span class="owner"></span>
             <span class="pageno">{{ p }}</span>
           </div>
         {% endfor %}
       </div>
+      <p class="hint pagewarn" hidden></p>
     {% else %}
       <p class="muted">Could not render this document.</p>
     {% endif %}
@@ -37,15 +41,21 @@ as chips.</p>
     <div class="itemrows">
       {% for row in g.rows %}
         {% set it = row.item %}
-        <div class="itemrow" data-rid="{{ it.id }}">
+        <div class="itemrow" data-rid="{{ it.id }}" data-range="{{ it.first_page }}-{{ it.last_page }}">
           <div class="rangefields">
+            <span class="rowno"></span>
             <label>From
-              <input type="number" min="1" max="{{ g.source.page_count or 1 }}" class="pagein"
+              <input type="number" min="1" max="{{ g.source.page_count or 1 }}" class="pagein first"
                      name="first::{{ g.source.path }}::{{ it.id }}" value="{{ it.first_page }}">
             </label>
             <label>To
-              <input type="number" min="1" max="{{ g.source.page_count or 1 }}" class="pagein"
+              <input type="number" min="1" max="{{ g.source.page_count or 1 }}" class="pagein last"
                      name="last::{{ g.source.path }}::{{ it.id }}" value="{{ it.last_page }}">
+            </label>
+            <label class="pinbox" title="Keep this range exactly as typed, so two receipts can share a page">
+              <input type="checkbox" class="pin" name="pin::{{ g.source.path }}::{{ it.id }}"
+                     {% if it.pinned %}checked{% endif %}>
+              Set by hand
             </label>
           </div>
           <div class="itemmain">
@@ -53,13 +63,11 @@ as chips.</p>
               <input class="amount" type="text" name="amount::{{ g.source.path }}::{{ it.id }}"
                      value="{{ it.amount }}" placeholder="0.00" inputmode="decimal" autocomplete="off">
             </label>
-            {% if row.suggestions %}
-              <div class="chips">
-                {% for s in row.suggestions %}
-                  <button type="button" class="chip" data-amount="{{ s }}">R {{ s }}</button>
-                {% endfor %}
-              </div>
-            {% endif %}
+            <div class="chips">
+              {% for s in row.suggestions %}
+                <button type="button" class="chip" data-amount="{{ s }}">R {{ s }}</button>
+              {% endfor %}
+            </div>
             <label>Supplier / description
               <input type="text" name="label::{{ g.source.path }}::{{ it.id }}" value="{{ it.label }}"
                      placeholder="{{ g.default_label }}">
@@ -135,20 +143,65 @@ as chips.</p>
     return label;
   }
 
-  function buildItemRow(sourcePath, pageCount, defaultLabel) {
+  // Mirrors allocate_pages() in models.py: a left-to-right sweep in which each
+  // receipt starts no earlier than the page after the one before it and leaves
+  // a page for every receipt still to come. A row set by hand is clamped to the
+  // document but never moved, and takes no part in the sweep - that is what
+  // lets two receipts share a page. The server runs the same layout on submit,
+  // so this is what you see rather than what is finally saved.
+  function layOut(ranges, pageCount) {
+    var remaining = ranges.filter(function (r) { return !r.pinned; }).length;
+    var cursor = 1;
+    return ranges.map(function (range) {
+      if (range.pinned) {
+        var start = Math.min(Math.max(range.first, 1), pageCount);
+        return {first: start, last: Math.min(Math.max(range.last, start), pageCount)};
+      }
+      remaining -= 1;
+      var ceiling = Math.max(1, pageCount - remaining);
+      var first = Math.min(Math.max(range.first, cursor), ceiling);
+      var last = Math.min(Math.max(range.last, first), ceiling);
+      cursor = last + 1;
+      return {first: first, last: last};
+    });
+  }
+
+  function plural(word, items) {
+    return items.length > 1 ? word + 's' : word;
+  }
+
+  function list(items) {
+    if (items.length < 2) return String(items[0]);
+    return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+  }
+
+  function buildItemRow(sourcePath, pageCount, defaultLabel, range) {
     var rid = 'new' + (rowCounter++);
     var wrap = document.createElement('div');
     wrap.className = 'itemrow';
     wrap.dataset.rid = rid;
 
-    var range = document.createElement('div');
-    range.className = 'rangefields';
-    var first = field('number', 'first::' + sourcePath + '::' + rid, '1');
-    first.min = '1'; first.max = String(pageCount); first.className = 'pagein';
-    var last = field('number', 'last::' + sourcePath + '::' + rid, String(pageCount));
-    last.min = '1'; last.max = String(pageCount); last.className = 'pagein';
-    range.appendChild(labelled('From', first));
-    range.appendChild(labelled('To', last));
+    var fields = document.createElement('div');
+    fields.className = 'rangefields';
+    var number = document.createElement('span');
+    number.className = 'rowno';
+    var first = field('number', 'first::' + sourcePath + '::' + rid, String(range.first));
+    first.min = '1'; first.max = String(pageCount); first.className = 'pagein first';
+    var last = field('number', 'last::' + sourcePath + '::' + rid, String(range.last));
+    last.min = '1'; last.max = String(pageCount); last.className = 'pagein last';
+    // The box comes before its text here, matching the server-rendered row.
+    var pin = field('checkbox', 'pin::' + sourcePath + '::' + rid);
+    pin.className = 'pin';
+    pin.checked = !!range.pinned;
+    var pinbox = document.createElement('label');
+    pinbox.className = 'pinbox';
+    pinbox.title = 'Keep this range exactly as typed, so two receipts can share a page';
+    pinbox.appendChild(pin);
+    pinbox.appendChild(document.createTextNode(' Set by hand'));
+    fields.appendChild(number);
+    fields.appendChild(labelled('From', first));
+    fields.appendChild(labelled('To', last));
+    fields.appendChild(pinbox);
 
     var main = document.createElement('div');
     main.className = 'itemmain';
@@ -158,7 +211,10 @@ as chips.</p>
     amount.autocomplete = 'off';
     var supplier = field('text', 'label::' + sourcePath + '::' + rid, '', defaultLabel);
     var note = field('text', 'note::' + sourcePath + '::' + rid, '');
+    var chips = document.createElement('div');
+    chips.className = 'chips';
     main.appendChild(labelled('Amount claimed', amount));
+    main.appendChild(chips);
     main.appendChild(labelled('Supplier / description', supplier));
     main.appendChild(labelled('Note', note, '(optional)'));
 
@@ -168,7 +224,7 @@ as chips.</p>
     remove.title = 'Remove this receipt';
     remove.textContent = '×';
 
-    wrap.appendChild(range);
+    wrap.appendChild(fields);
     wrap.appendChild(main);
     wrap.appendChild(remove);
     return wrap;
@@ -247,6 +303,141 @@ as chips.</p>
     var defaultLabel = card.dataset.defaultlabel || '';
     var container = card.querySelector('.itemrows');
     var rowlist = card.querySelector('.rowlist');
+    var addBtn = card.querySelector('.addrow');
+    var warning = card.querySelector('.pagewarn');
+
+    // ---- page ownership -------------------------------------------------
+    // A page belongs to exactly one receipt, and the rows are kept in page
+    // order so that layOut() above can place them in one sweep.
+
+    function rowsOf() {
+      return Array.prototype.slice.call(container.querySelectorAll('.itemrow'));
+    }
+
+    function ends(row) {
+      return {
+        first: row.querySelector('.pagein.first'),
+        last: row.querySelector('.pagein.last')
+      };
+    }
+
+    function readRange(row) {
+      var io = ends(row), pin = row.querySelector('.pin');
+      return {
+        first: parseInt(io.first.value, 10) || 1,
+        last: parseInt(io.last.value, 10) || 1,
+        pinned: !!(pin && pin.checked)
+      };
+    }
+
+    function normalise() {
+      var rows = rowsOf();
+      var laid = layOut(rows.map(readRange), pageCount);
+      rows.forEach(function (row, index) {
+        var io = ends(row);
+        io.first.value = String(laid[index].first);
+        io.last.value = String(laid[index].last);
+        // Chips are read off the pages of this receipt, so a range that moved
+        // needs its own figures - the neighbour's are no longer its own.
+        var range = laid[index].first + '-' + laid[index].last;
+        if (row.dataset.range !== range) {
+          row.dataset.range = range;
+          refreshChips(row);
+        }
+      });
+      describe(rows);
+      syncRowList();
+    }
+
+    function ownersOf(rows) {
+      var owners = {};
+      rows.forEach(function (row, index) {
+        var range = readRange(row);
+        for (var page = range.first; page <= range.last; page++) {
+          (owners[page] = owners[page] || []).push(index + 1);
+        }
+      });
+      return owners;
+    }
+
+    function describe(rows) {
+      rows.forEach(function (row, index) {
+        row.querySelector('.rowno').textContent = 'Receipt ' + (index + 1);
+      });
+
+      var owners = ownersOf(rows);
+      var orphans = [], shared = [];
+      card.querySelectorAll('.pagethumb').forEach(function (thumb) {
+        var page = parseInt(thumb.querySelector('img').dataset.page, 10);
+        var claimed = owners[page] || [];
+        if (!claimed.length) orphans.push(page);
+        if (claimed.length > 1) shared.push(page);
+        thumb.classList.toggle('unclaimed', !claimed.length);
+        thumb.classList.toggle('shared', claimed.length > 1);
+        var badge = thumb.querySelector('.owner');
+        badge.textContent = claimed.length ? claimed.join(',') : '–';
+        badge.title = claimed.length
+          ? 'Receipt ' + claimed.join(' and ')
+          : 'No receipt claims this page';
+      });
+
+      if (warning) {
+        var notes = [];
+        if (orphans.length) {
+          notes.push(
+            plural('Page', orphans) + ' ' + list(orphans) + ' ' +
+            (orphans.length > 1 ? 'belong' : 'belongs') +
+            ' to no receipt and will be left out of the bundle.');
+        }
+        if (shared.length) {
+          notes.push(
+            plural('Page', shared) + ' ' + list(shared) + ' ' +
+            (shared.length > 1 ? 'are' : 'is') +
+            ' claimed by more than one receipt, so ' +
+            (shared.length > 1 ? 'they appear' : 'it appears') +
+            ' once under each in the bundle.');
+        }
+        warning.hidden = notes.length === 0;
+        warning.textContent = notes.join(' ');
+      }
+    }
+
+    function freeRun(rows) {
+      var owners = ownersOf(rows), start = 0;
+      for (var page = 1; page <= pageCount; page++) {
+        if (!owners[page]) { start = page; break; }
+      }
+      if (!start) return null;
+      var end = start;
+      while (end + 1 <= pageCount && !owners[end + 1]) end++;
+      return {first: start, last: end};
+    }
+
+    function nextRange(rows) {
+      var free = freeRun(rows);
+      if (free) return free;
+      // Everything is claimed, so take the last page off the last receipt that
+      // has one to spare: a two-page PDF split in two becomes p.1 and p.2.
+      for (var i = rows.length - 1; i >= 0; i--) {
+        var range = readRange(rows[i]);
+        if (!range.pinned && range.last > range.first) {
+          ends(rows[i]).last.value = String(range.last - 1);
+          return {first: range.last, last: range.last};
+        }
+      }
+      // Nothing left to divide - the only receipt that can be added here is a
+      // second one on a page already taken, so it starts out set by hand.
+      var lastRange = rows.length ? readRange(rows[rows.length - 1]) : {last: 1};
+      return {first: lastRange.last, last: lastRange.last, pinned: true};
+    }
+
+    function insertInPageOrder(row, first) {
+      var rows = rowsOf(), before = null;
+      for (var i = 0; i < rows.length; i++) {
+        if (readRange(rows[i]).first > first) { before = rows[i]; break; }
+      }
+      container.insertBefore(row, before);
+    }
 
     function syncRowList() {
       var ids = Array.prototype.map.call(
@@ -259,8 +450,52 @@ as chips.</p>
     function wireRemove(row) {
       row.querySelector('.removeitem').addEventListener('click', function () {
         row.remove();
-        syncRowList();
+        normalise();
       });
+    }
+
+    function wireRange(row) {
+      var io = ends(row);
+      io.first.addEventListener('change', function () {
+        var rows = rowsOf(), index = rows.indexOf(row);
+        var want = parseInt(io.first.value, 10) || 1;
+        if (index > 0) {
+          // Moving a receipt's start moves the boundary with the one before
+          // it, which gives up the pages this receipt now claims.
+          var previous = ends(rows[index - 1]);
+          var start = parseInt(previous.first.value, 10) || 1;
+          previous.last.value = String(Math.max(start, want - 1));
+        }
+        normalise();
+      });
+      io.last.addEventListener('change', normalise);
+      var pin = row.querySelector('.pin');
+      if (pin) pin.addEventListener('change', normalise);
+    }
+
+    function refreshChips(row) {
+      var box = row.querySelector('.chips');
+      if (!box) return;
+      var range = readRange(row);
+      var token = String(Date.now()) + Math.random();
+      box.dataset.token = token;
+      box.textContent = '';  // never leave a figure from the old range on offer
+      fetch('/api/amounts/' + encodeURIComponent(sourcePath) +
+            '?first=' + range.first + '&last=' + range.last)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (box.dataset.token !== token) return;  // a later edit already won
+          (data.amounts || []).forEach(function (amount) {
+            var chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'chip';
+            chip.dataset.amount = amount;
+            chip.textContent = 'R ' + amount;
+            box.appendChild(chip);
+          });
+          wireChips(row);
+        })
+        .catch(function () { /* the amount is typed instead */ });
     }
 
     function wireChips(row) {
@@ -275,14 +510,17 @@ as chips.</p>
 
     container.querySelectorAll('.itemrow').forEach(function (row) {
       wireRemove(row);
+      wireRange(row);
       wireChips(row);
     });
 
-    card.querySelector('.addrow').addEventListener('click', function () {
-      var row = buildItemRow(sourcePath, pageCount, defaultLabel);
+    addBtn.addEventListener('click', function () {
+      var range = nextRange(rowsOf());
+      var row = buildItemRow(sourcePath, pageCount, defaultLabel, range);
       wireRemove(row);
-      container.appendChild(row);
-      syncRowList();
+      wireRange(row);
+      insertInPageOrder(row, range.first);
+      normalise();
       row.querySelector('.amount').focus();
     });
 
@@ -310,6 +548,8 @@ as chips.</p>
       img.addEventListener('click', open);
       thumb.querySelector('.expandbtn').addEventListener('click', open);
     });
+
+    normalise();  // number the rows and badge the pages the server sent
   });
 })();
 </script>

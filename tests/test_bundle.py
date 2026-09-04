@@ -39,6 +39,123 @@ def test_bundle_contains_index_statement_and_receipts(statement_pdf, receipt_pdf
         assert "Invoice 4469" in doc[2].get_text("text")
 
 
+def _index_text(path):
+    """Text of every index page - the ones carrying the claim summary table."""
+    with pymupdf.open(path) as doc:
+        pages = [doc[i].get_text("text") for i in range(len(doc))]
+    return "\n".join(p for p in pages if "Supporting document" in p)
+
+
+def test_a_long_name_and_description_still_print_in_full_rows(statement_pdf, receipt_pdf, tmp_path):
+    """The summary table used to blank whole cells rather than wrap them.
+
+    ``insert_textbox`` draws nothing at all when its text does not fit the
+    rectangle, so one long supplier name took the filename and page range down
+    with it, and a long statement description took the matched page number and
+    account with it - intermittently, depending on how long the values were.
+    """
+    long_name = tmp_path / "Scanned_Documents_From_The_Office_Printer_2026_08_26.pdf"
+    long_name.write_bytes(receipt_pdf.read_bytes())
+
+    source = Source(path=long_name.name, page_count=1)
+    item = ClaimItem(
+        source=source.path,
+        first_page=1,
+        last_page=1,
+        label="Woolworths Food Sandton City Superstore Branch 4471",
+        amount="1322.98",
+    )
+    match = Match(
+        item_key=item.key,
+        page=7,
+        row_index=4,
+        column="debit",
+        date="2026-08-26",
+        description="CARD PURCHASE WOOLWORTHS SANDTON CITY SUPERSTORE 447102",
+        account="Gold Business Cheque Account",
+        confirmed=True,
+    )
+    out = tmp_path / "bundle.pdf"
+    build_bundle(
+        out,
+        redacted_statement=statement_pdf,
+        entries=[BundleEntry(item, source, match)],
+        claim_folder=tmp_path,
+    )
+
+    # Wrapping breaks lines, so compare on text with the line breaks taken out.
+    flat = " ".join(_index_text(out).split())
+    assert "Woolworths Food Sandton City Superstore Branch 4471" in flat
+    assert "(p.1)" in flat
+    assert "p.7" in flat  # the statement page the line was found on
+    assert "Gold Business Cheque Account" in flat
+    assert "CARD PURCHASE WOOLWORTHS SANDTON CITY SUPERSTORE 447102" in flat
+
+    # A filename with nothing to break on is split wherever it has to be, so
+    # look for it with the wrapping squeezed out entirely.
+    assert long_name.name in "".join(_index_text(out).split())
+
+
+def test_an_unmatched_claim_says_so(statement_pdf, receipt_pdf, tmp_path):
+    source = Source(path=receipt_pdf.name, page_count=1)
+    item = ClaimItem(source=source.path, first_page=1, last_page=1, label="Vet", amount="10.00")
+    not_found = Match(
+        item_key=item.key,
+        page=0,
+        row_index=-1,
+        column="",
+        date="",
+        description="",
+        account="",
+        confirmed=True,
+        not_found=True,
+    )
+    out = tmp_path / "bundle.pdf"
+    build_bundle(
+        out,
+        redacted_statement=statement_pdf,
+        entries=[BundleEntry(item, source, None), BundleEntry(item, source, not_found)],
+        claim_folder=tmp_path,
+    )
+    flat = " ".join(_index_text(out).split())
+    assert "Not matched" in flat
+    assert "Not found on statement" in flat
+
+
+def test_a_summary_too_long_for_one_page_repeats_the_column_headings(
+    statement_pdf, receipt_pdf, tmp_path
+):
+    source = Source(path=receipt_pdf.name, page_count=1)
+    entries = []
+    for n in range(40):
+        item = ClaimItem(
+            source=source.path,
+            first_page=1,
+            last_page=1,
+            label=f"Supplier {n} trading as a name long enough to need two lines",
+            amount="100.00",
+        )
+        entries.append(BundleEntry(item, source, None))
+
+    out = tmp_path / "bundle.pdf"
+    build_bundle(
+        out,
+        redacted_statement=statement_pdf,
+        entries=entries,
+        claim_folder=tmp_path,
+    )
+    with pymupdf.open(out) as doc:
+        headed = [i for i in range(len(doc)) if "Supporting document" in doc[i].get_text("text")]
+        footed = [i for i in range(len(doc)) if "permanently removed" in doc[i].get_text("text")]
+    assert len(headed) > 1  # the table ran on, and every page of it is headed
+    assert headed == list(range(len(headed)))  # index pages come first, in a run
+    assert len(footed) == 1  # the note sits once, at the end of the summary
+
+    flat = " ".join(_index_text(out).split())
+    for n in range(40):
+        assert f"Supplier {n} trading as a name long enough to need two lines" in flat
+
+
 def test_receipt_pages_are_normalised_to_a4(statement_pdf, receipt_pdf, tmp_path):
     letter = tmp_path / "letter.pdf"
     doc = pymupdf.open()

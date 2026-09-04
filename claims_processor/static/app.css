@@ -181,6 +181,14 @@ table.docs{width:100%;border-collapse:collapse}
 .pagethumb img{max-width:100%;max-height:100%;object-fit:contain;display:block;cursor:zoom-in}
 .pagethumb .pageno{position:absolute;left:5px;bottom:4px;font-size:10px;color:#fff;
   background:rgba(0,0,0,.55);padding:1px 6px;border-radius:999px;line-height:1.4}
+/* Which receipt owns this page - every page belongs to exactly one. */
+.pagethumb .owner{position:absolute;left:5px;top:5px;font-size:10px;font-weight:650;
+  color:#fff;background:var(--accent);padding:1px 7px;border-radius:999px;line-height:1.5}
+.pagethumb.unclaimed{border-style:dashed;opacity:.6}
+.pagethumb.unclaimed .owner{background:var(--line);color:var(--muted)}
+/* Deliberately shared - two receipts on one sheet. */
+.pagethumb.shared{border-color:var(--warn)}
+.pagethumb.shared .owner{background:var(--warn);color:#fff}
 .rotatebtn,.expandbtn{position:absolute;width:24px;height:24px;border-radius:50%;
   border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:13px;
   cursor:pointer;display:grid;place-items:center;padding:0}
@@ -228,8 +236,13 @@ body.lb-open{overflow:hidden}
 .itemrows{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
 .itemrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:16px;align-items:start;
   padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
-.rangefields{display:flex;gap:10px}
+.rangefields{display:flex;gap:10px;flex-wrap:wrap}
 .rangefields label{width:64px;margin-bottom:0}
+.rowno{flex:0 0 100%;font-size:10.5px;font-weight:650;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--muted)}
+.rangefields label.pinbox{flex:0 0 100%;width:auto;display:flex;align-items:center;gap:5px;
+  font-size:11px;color:var(--muted);cursor:pointer;margin-top:2px}
+.pinbox input{margin:0}
 .pagein{padding:6px 8px;text-align:center}
 .itemmain{display:grid;gap:0}
 .itemmain label{margin-bottom:8px}
@@ -238,6 +251,7 @@ body.lb-open{overflow:hidden}
   line-height:1;color:var(--muted)}
 .removeitem:hover{color:var(--bad);border-color:var(--bad)}
 .addrow{font-size:12.5px;padding:7px 14px}
+.pagewarn{margin:0 0 14px}
 
 @media (max-width:640px){
   .itemrow{grid-template-columns:1fr;gap:10px}
