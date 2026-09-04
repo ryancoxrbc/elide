@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pymupdf
 
-from .models import ClaimItem, Match, Source, allocate_pages
+from .models import ClaimItem, Match, Source
 
 PROJECT_FILE = "claim_project.json"
 OUTPUT_DIR = "claim_output"  # where every generated file is written
@@ -96,31 +96,21 @@ class ClaimProject:
         """Claim items that carry a usable amount."""
         return [i for i in self.included_items() if i.value is not None]
 
-    def reallocate_pages(self) -> None:
-        """Re-lay every source's items over its pages, so none overlap.
-
-        Applied on load as well as on save: a project written before receipts
-        owned whole pages can hold two items on one page, which would otherwise
-        put that page into the bundle twice.
-        """
-        ordered: list[ClaimItem] = []
-        for src in self.sources:
-            ordered.extend(allocate_pages(self.items_for(src.path), src.page_count))
-        known = {s.path for s in self.sources}
-        # Items whose source vanished keep their place rather than disappearing
-        # here; step 1 is what prunes them.
-        self.items = ordered + [i for i in self.items if i.source not in known]
+    def ensure_items(self) -> None:
+        """Give every included source at least one claim item."""
+        for src in self.included_sources():
+            self.ensure_default_item(src)
 
     def ensure_default_item(self, src: Source) -> None:
-        """Give every source at least one claim item spanning all its pages.
+        """Give every source at least one claim item holding all its pages.
 
         Called when step 2 is first shown for a source, so the common case -
-        one PDF, one receipt - needs no extra clicks. Splitting or trimming the
-        range is opt-in from there.
+        one PDF, one receipt - needs no extra clicks. Cutting the document into
+        several receipts is opt-in from there.
         """
         if self.items_for(src.path):
             return
-        self.items.append(ClaimItem(source=src.path, first_page=1, last_page=max(src.page_count, 1)))
+        self.items.append(ClaimItem(source=src.path, pages=all_pages(src)))
 
     def confirmed_matches(self) -> list[Match]:
         return [m for m in self.matches.values() if m.confirmed and not m.not_found]
@@ -168,11 +158,37 @@ class ClaimProject:
             _migrate_legacy_receipts(project, root, data)
         else:
             project.sources = [Source(**s) for s in data.get("sources", [])]
-            project.items = [ClaimItem(**i) for i in data.get("items", [])]
+            project.items = [_item_from_dict(i) for i in data.get("items", [])]
             project.matches = {k: Match(**v) for k, v in data.get("matches", {}).items()}
-            project.reallocate_pages()
 
         return project
+
+
+def all_pages(src: Source) -> list[int]:
+    """Every page of a source, ignored ones included.
+
+    The default receipt holds all of them; ``pages_of`` is what drops the ones
+    left out of the claim, so putting a page back restores it to its receipt
+    rather than losing it.
+    """
+    return list(range(1, max(src.page_count, 1) + 1))
+
+
+def _item_from_dict(data: dict) -> ClaimItem:
+    """Read one claim item, upgrading a project file from before page lists.
+
+    Receipts used to be a ``first_page``..``last_page`` range with a ``pinned``
+    flag that exempted it from an automatic layout. The range becomes the list
+    of pages it covered, and the flag has nothing left to mean now that the
+    pages are named outright.
+    """
+    fields = {k: v for k, v in data.items() if k in {"source", "id", "label", "amount", "note"}}
+    pages = data.get("pages")
+    if pages is None:
+        first = int(data.get("first_page", 1))
+        last = int(data.get("last_page", first))
+        pages = list(range(first, max(last, first) + 1))
+    return ClaimItem(**fields, pages=sorted({int(p) for p in pages}))
 
 
 def _migrate_legacy_receipts(project: "ClaimProject", root: Path, data: dict) -> None:
@@ -202,8 +218,7 @@ def _migrate_legacy_receipts(project: "ClaimProject", root: Path, data: dict) ->
         )
         item = ClaimItem(
             source=path,
-            first_page=1,
-            last_page=max(page_count, 1),
+            pages=list(range(1, max(page_count, 1) + 1)),
             label=entry.get("label", ""),
             amount=entry.get("amount", ""),
             note=entry.get("note", ""),

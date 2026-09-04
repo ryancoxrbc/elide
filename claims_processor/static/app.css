@@ -167,35 +167,59 @@ table.docs{width:100%;border-collapse:collapse}
 .pickerhint{margin:0;padding:10px 14px;color:var(--muted);font-size:12px;
   border-top:1px solid var(--line)}
 
-/* ---- receipt splitting (step 2) ------------------------------------- */
+/* ---- separating the receipts (step 2) -------------------------------- */
 .sourcecard{padding:16px}
 .sourcehead{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
 .sourcehead h3{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;font-weight:500;
   word-break:break-all;color:var(--ink)}
 
-.pagestrip{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 12px;margin-bottom:14px;
+.pagestrip{display:flex;gap:12px;overflow-x:auto;padding:2px 2px 14px;margin-bottom:14px;
   border-bottom:1px solid var(--line)}
-.pagethumb{position:relative;flex:0 0 auto;width:150px;height:188px;border:1px solid var(--line);
-  border-radius:6px;background:var(--bg);display:flex;align-items:center;justify-content:center;
+.pagethumb{position:relative;flex:0 0 auto;width:186px;height:236px;border:1px solid var(--line);
+  border-radius:8px;background:var(--bg);display:flex;align-items:center;justify-content:center;
   overflow:hidden}
 .pagethumb img{max-width:100%;max-height:100%;object-fit:contain;display:block;cursor:zoom-in}
-.pagethumb .pageno{position:absolute;left:5px;bottom:4px;font-size:10px;color:#fff;
+.pagethumb .pageno{position:absolute;left:6px;bottom:6px;font-size:10px;color:#fff;
   background:rgba(0,0,0,.55);padding:1px 6px;border-radius:999px;line-height:1.4}
-/* Which receipt owns this page - every page belongs to exactly one. */
-.pagethumb .owner{position:absolute;left:5px;top:5px;font-size:10px;font-weight:650;
-  color:#fff;background:var(--accent);padding:1px 7px;border-radius:999px;line-height:1.5}
-.pagethumb.unclaimed{border-style:dashed;opacity:.6}
-.pagethumb.unclaimed .owner{background:var(--line);color:var(--muted)}
-/* Deliberately shared - two receipts on one sheet. */
-.pagethumb.shared{border-color:var(--warn)}
-.pagethumb.shared .owner{background:var(--warn);color:#fff}
-.rotatebtn,.expandbtn{position:absolute;width:24px;height:24px;border-radius:50%;
-  border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:13px;
-  cursor:pointer;display:grid;place-items:center;padding:0}
-.rotatebtn{top:4px;right:4px}
-.expandbtn{bottom:4px;right:4px;font-size:12px}
-.rotatebtn:hover,.expandbtn:hover{border-color:var(--accent);color:var(--accent)}
-.rotatebtn:disabled{opacity:.5;cursor:default}
+/* Which receipts this page belongs to. Usually one bubble; two when a sheet
+   holds two receipts, which is said by picking the page twice. */
+.bubbles{position:absolute;left:6px;top:6px;display:flex;gap:4px}
+.bubble{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;
+  font-size:11px;font-weight:700;color:#fff;background:var(--accent);
+  box-shadow:0 1px 3px rgba(0,0,0,.3)}
+/* The receipt being picked right now, so its pages stand out from the settled ones. */
+.bubble.picking{background:var(--warn)}
+
+/* Out of the bundle, however it got there: crossed out by hand, or picked by
+   no receipt. One look for one outcome. */
+.pagethumb.ignored,
+.pagethumb.unclaimed{border-style:dashed;border-color:var(--line)}
+.pagethumb.ignored img,
+.pagethumb.unclaimed img{opacity:.22;filter:grayscale(1)}
+.ignoredtag{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-size:10.5px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);border:1px solid var(--line);background:var(--panel);
+  padding:3px 9px;border-radius:999px;display:none}
+.pagethumb.ignored .ignoredtag,
+.pagethumb.unclaimed .ignoredtag{display:block}
+
+/* Picking pages: the whole thumbnail is the target, and a drag along the strip
+   must sweep pages rather than scroll it or select the page numbers as text. */
+.pagestrip.selecting{user-select:none}
+.pagestrip.selecting .pagethumb{cursor:pointer;touch-action:none}
+.pagestrip.selecting .pagethumb img{cursor:pointer}
+.pagethumb.picked{border-color:var(--warn);box-shadow:inset 0 0 0 2px var(--warn)}
+.pagethumb.picked img{opacity:1;filter:none}
+
+.thumbtools{position:absolute;top:6px;right:6px;display:flex;flex-direction:column;gap:5px}
+.thumbbtn{width:26px;height:26px;border-radius:50%;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);font-size:13px;cursor:pointer;
+  display:grid;place-items:center;padding:0;line-height:1}
+.thumbbtn:hover{border-color:var(--accent);color:var(--accent)}
+.thumbbtn:disabled{opacity:.5;cursor:default}
+.ignorebtn:hover{border-color:var(--bad);color:var(--bad)}
+.ignorebtn[aria-pressed="true"],
+.ignorebtn[aria-pressed="true"]:hover{background:var(--muted);border-color:var(--muted);color:var(--panel)}
 
 /* ---- lightbox: full-size page preview -------------------------------- */
 .lightbox{position:fixed;inset:0;z-index:100}
@@ -233,27 +257,51 @@ body.lb-open{overflow:hidden}
   .lbnav{width:34px;height:34px;font-size:17px}
 }
 
-.itemrows{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
-.itemrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:16px;align-items:start;
-  padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
-.rangefields{display:flex;gap:10px;flex-wrap:wrap}
-.rangefields label{width:64px;margin-bottom:0}
-.rowno{flex:0 0 100%;font-size:10.5px;font-weight:650;letter-spacing:.04em;
-  text-transform:uppercase;color:var(--muted)}
-.rangefields label.pinbox{flex:0 0 100%;width:auto;display:flex;align-items:center;gap:5px;
-  font-size:11px;color:var(--muted);cursor:pointer;margin-top:2px}
-.pinbox input{margin:0}
-.pagein{padding:6px 8px;text-align:center}
-.itemmain{display:grid;gap:0}
-.itemmain label{margin-bottom:8px}
-.itemmain label:last-child{margin-bottom:0}
-.removeitem{align-self:start;width:28px;height:28px;padding:0;border-radius:50%;font-size:15px;
-  line-height:1;color:var(--muted)}
-.removeitem:hover{color:var(--bad);border-color:var(--bad)}
-.addrow{font-size:12.5px;padding:7px 14px}
-.pagewarn{margin:0 0 14px}
+/* The bar under the strip: how this document is cut up, and the way to cut it. */
+.splitbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.multitoggle{display:flex;align-items:center;gap:7px;margin-bottom:0;cursor:pointer;
+  font-size:12.5px;font-weight:600}
+.multitoggle input{margin:0}
+.splitstatus{font-size:12.5px;margin-right:auto}
+.splitbar .ghost{font-size:12.5px;padding:7px 14px}
+.donebtn{border-color:var(--accent);color:var(--accent);font-weight:650}
+.selecthint{margin:0 0 12px}
 
+/* The last action on the last step: the claim is built, the window can go. */
+.closerun{background:var(--ok);color:#fff;font-weight:650}
+.card.finished{text-align:center;padding:26px}
+.card.finished h2{margin-top:0}
+
+/* ---- one card per receipt (step 3) ----------------------------------- */
+.receiptcard{display:grid;grid-template-columns:380px minmax(0,1fr);gap:26px;padding:18px}
+.receiptview{display:flex;flex-direction:column;gap:8px}
+.receiptframe{position:relative;height:500px;border:1px solid var(--line);border-radius:8px;
+  background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.receiptframe.empty{border-style:dashed;font-size:12.5px;text-align:center;padding:16px}
+.receiptframe img{max-width:100%;max-height:100%;object-fit:contain;display:block;cursor:zoom-in}
+.pagenav{position:absolute;top:50%;transform:translateY(-50%);width:32px;height:32px;
+  border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  font-size:18px;cursor:pointer;display:grid;place-items:center;padding:0;line-height:1}
+.pagenav:hover{border-color:var(--accent);color:var(--accent)}
+.pagenav:disabled{opacity:.3;cursor:default}
+/* display:grid above outranks the browser's [hidden]{display:none}. */
+.pagenav[hidden]{display:none}
+.pagenav.prev{left:8px}
+.pagenav.next{right:8px}
+.receiptfoot{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.pagecount{font-size:12px}
+.receiptfoot .rotatebtn{padding:5px 11px;font-size:13px;line-height:1}
+.receipthead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.receipthead h3{margin:0;font-size:12px;font-weight:650;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--ink)}
+.receipthead .muted{font-family:ui-monospace,Menlo,monospace;font-size:11px;word-break:break-all}
+.receiptform label{display:block;margin-bottom:12px}
+.receiptform .chips{margin:-6px 0 12px}
+
+@media (max-width:900px){
+  .receiptcard{grid-template-columns:1fr}
+  .receiptframe{height:420px}
+}
 @media (max-width:640px){
-  .itemrow{grid-template-columns:1fr;gap:10px}
-  .removeitem{justify-self:end}
+  .splitstatus{order:99;margin-right:0;width:100%}
 }

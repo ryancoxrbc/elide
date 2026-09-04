@@ -39,6 +39,15 @@ On an [Omarchy](https://omarchy.org/) system it opens in an app-mode browser win
 `omarchy launch webapp`) — no tab strip, no address bar, and nothing added to your app menu.
 Everywhere else it uses your default browser. `--no-browser` skips opening anything.
 
+**Closing the window stops the server**, so the terminal you started it from comes back to you
+rather than being left holding a port. The last step has a **Close** button that does both at once
+— it shuts the wizard and ends the run — and closing the window yourself does the same thing a few
+seconds later.
+
+Moving between steps is not closing it, and neither is leaving the tab in the background; a second
+tab on the same claim keeps the run going until both are shut. Started with `--no-browser` and
+never opened, it stays up as it always did, and Ctrl-C still works throughout.
+
 **Everything written goes into the claim folder you choose**, never into this project
 directory. Only the saved-state file sits at the top level; every generated file goes into a
 `claim_output/` subfolder, so reopening the claim folder never mistakes a previous run's
@@ -51,7 +60,11 @@ output for a source document:
 | `claim_output/Claim_Bundle_<folder>.pdf` | The deliverable |
 | `claim_output/redaction_report.txt` | What was removed, what was kept, and the verification result |
 
-## The five steps
+## The six steps
+
+Structure and detail are separate steps: you settle which pages make up which receipt first,
+and only then does the app ask what each one cost — one card per receipt rather than one row
+per PDF.
 
 1. **Documents** — pick the claim folder by clicking through it: breadcrumbs, a folder list
    badged with how many source PDFs each holds and whether a claim is already in progress
@@ -60,37 +73,42 @@ output for a source document:
    or paste a path. Then confirm which PDF is the certified statement — auto-detected by
    filename, falling back to scoring each document's text for statement markers — and mark the
    rest as receipts or ignore them.
-2. **Amounts** — split each document into its receipts. A source PDF is shown as a strip of
-   page thumbnails; click one (or its &#9974;) to open it full-size, with next/previous and a
-   rotate button of its own — the thumbnail strip updates the moment you rotate, no save step
-   either way. Below the strip, one row per receipt: a page range (from/to), the amount, a
-   supplier label and a note. Amounts found in that range's own text are offered as chips, best
-   guess first. **A source starts with one row spanning every page** — the common case, one PDF
-   holding one receipt, needs no extra clicks. Click **+ Split off another receipt** to carve
-   out more.
+2. **Receipts** — separate each PDF into the receipts inside it, by pointing at the pages. A
+   source is shown as a strip of page thumbnails, each with its own **↻** rotate, **⚲**
+   open-full-size and **✕** ignore buttons; rotating and ignoring take effect at once, no save
+   step. **A document starts as one receipt covering every page** — the common case, one PDF
+   holding one receipt, needs no clicks at all.
 
-   **By default a receipt owns whole pages and no two share one**, because an accidental
-   overlap is the common mistake. Splitting off another receipt therefore takes pages from its
-   neighbour rather than doubling up — on a two-page PDF, one row becomes p.1 and the new row
-   p.2 — and editing a from/to moves the boundary between them, with the neighbours giving way.
-   Each thumbnail is badged with the number of the receipt that owns it, so the split is visible
-   on the pages themselves. A page you leave to no receipt is marked unclaimed and called out:
-   it stays out of the bundle, which is how a blank back page is dropped. The amount chips
-   follow the pages, so a figure read off page 3 stops being offered for a receipt that now ends
-   at page 1.
+   **Multiple receipts** is the switch under the strip. Turn it on and the document empties: every
+   page greys out, because a page belongs to no receipt until you say so. The bar reads
+   *Selecting receipt 1* — click the pages that make it up, or press and drag along the strip to
+   take a run of them in one go. Clicking a page you already took puts it back. **Done** settles
+   that receipt, **+ Add receipt 2** starts the next, and so on until the document is used up.
+   **Reset** puts the whole document back to a single receipt.
 
-   **Two receipts on one page is still supported** — it is opt-in rather than the default. Tick
-   **Set by hand** on a row and its range is taken exactly as typed: nothing moves it, and it
-   takes no part in the automatic layout, so pinning one row never shunts the others around.
-   Splitting a single-page PDF does this for you, since a second receipt there can only be a
-   shared one. A shared page is badged with both receipt numbers and called out as appearing
-   once under each in the bundle.
-3. **Confirm** — for each amount, every statement line that moved exactly that sum is listed.
+   **Every page wears a bubble for the receipt it belongs to**, so the split is visible on the
+   pages themselves rather than in a column of numbers. **A page can wear two** — that is two till
+   slips scanned onto one sheet, and it reaches the bundle once under each receipt. Nothing
+   rearranges itself behind you: a receipt holds exactly the pages you picked, and two receipts
+   sharing a page or a receipt skipping one in the middle are simply what you clicked.
+
+   **A page you never pick stays grey and marked *Ignored*** — a cover sheet, a duplicate scan,
+   the blank reverse of an invoice. It stays in your source document and never reaches the bundle.
+   **✕ says the same thing outright** and works whether the document is one receipt or several: it
+   takes the page out of the claim even when a receipt still names it.
+3. **Amounts** — one card per receipt, with the receipt itself beside the fields: page through
+   its own pages with **‹ ›**, rotate it, or click it to read it full-size. Then the amount, a
+   supplier label and a note. Amounts found in that receipt's own pages are offered as chips,
+   best guess first — the pages are settled by now, so a chip can only ever come off a page
+   that receipt actually claims.
+4. **Confirm** — for each amount, every statement line that moved exactly that sum is listed.
    You pick the right one. Nothing is auto-accepted, even when only one line matches, because
    statements routinely repeat amounts.
-4. **Preview** — all statement pages rendered with the proposed redactions in red and your
+5. **Preview** — all statement pages rendered with the proposed redactions in red and your
    claimed lines outlined in green. Last look before anything is written.
-5. **Build** — redacts, assembles, verifies, and reports.
+6. **Build** — redacts, assembles, verifies, and reports. Once the bundle exists, **Close** ends
+   the whole thing: it shuts the window and stops the server, leaving your finished claim in the
+   folder and your terminal back where it was.
 
 ## What gets removed
 
@@ -144,7 +162,7 @@ A build that fails verification is reported as failed. It is never quietly hande
 .venv/bin/pytest -q
 ```
 
-96 tests, hermetic — they build a synthetic statement in-process and never touch real claim data.
+100 tests, hermetic — they build a synthetic statement in-process and never touch real claim data.
 
 ## Dependencies
 

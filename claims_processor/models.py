@@ -204,9 +204,28 @@ class Source:
     # clockwise. Per page rather than per document: a scanner batch routinely
     # comes out with its pages in different orientations.
     rotations: dict[str, int] = field(default_factory=dict)
+    # Pages left out of the claim: a blank back page, a separator sheet, a
+    # duplicate scan. They stay in the source document but never reach the
+    # bundle, and no receipt is expected to account for them.
+    ignored: list[int] = field(default_factory=list)
 
     def rotation_of(self, page: int) -> int:
         return int(self.rotations.get(str(page), 0)) % 360
+
+    def is_ignored(self, page: int) -> bool:
+        return page in self.ignored
+
+    def toggle_ignored(self, page: int) -> bool:
+        """Flip one page in or out of the claim; returns its new state."""
+        if page in self.ignored:
+            self.ignored.remove(page)
+            return False
+        self.ignored = sorted(self.ignored + [page])
+        return True
+
+    def live_pages(self) -> list[int]:
+        """Every page of this document that is not ignored."""
+        return [p for p in range(1, max(self.page_count, 1) + 1) if not self.is_ignored(p)]
 
     def rotate_anticlockwise(self, page: int, step: int = 90) -> int:
         turned = (self.rotation_of(page) - step) % 360
@@ -219,29 +238,28 @@ class Source:
 
 @dataclass
 class ClaimItem:
-    """One receipt: a run of pages in a source, and the amount claimed for it.
+    """One receipt: the pages of a source it is made of, and the amount claimed.
 
-    By default a receipt owns whole pages and the items of a source divide
-    those pages between them (see ``allocate_pages``), because a page holding
-    two receipts is the rare case and an accidental overlap is the common
-    mistake.  ``pinned`` is the deliberate exception: the range is then taken
-    exactly as typed, which is what lets two till slips scanned onto one sheet
-    both claim that page.
+    A receipt owns exactly the pages it was given.  They need not run
+    consecutively - a two-page invoice with an unrelated slip between its
+    halves is still one receipt - and two receipts may name the same page,
+    which is how two till slips scanned onto one sheet each claim it.  Both are
+    said deliberately, by pointing at the pages, so there is no layout rule
+    here to second-guess them.
 
-    Identity is not derived from source+range either way, because a range moves
-    whenever a neighbour does; each item carries its own id, assigned once and
-    never recomputed, so it survives the user editing the range or the amount.
+    Identity is not derived from source and pages, because the pages change
+    whenever the user re-cuts the document; each item carries its own id,
+    assigned once and never recomputed, so it survives an edit to its pages or
+    its amount, and the match made against it stays attached.
     """
 
     source: str
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
-    first_page: int = 1
-    last_page: int = 1
+    # Page numbers within the source, 1-based, ascending and without repeats.
+    pages: list[int] = field(default_factory=list)
     label: str = ""
     amount: str = ""  # kept as typed; parsed on demand
     note: str = ""
-    # Set by hand: keep this range as typed, overlaps included.
-    pinned: bool = False
 
     @property
     def key(self) -> str:
@@ -249,57 +267,34 @@ class ClaimItem:
         return self.id
 
     @property
-    def pages(self) -> list[int]:
-        return list(range(self.first_page, self.last_page + 1))
-
-    @property
     def value(self) -> Decimal | None:
         return parse_amount(self.amount)
 
     @property
     def page_label(self) -> str:
-        if self.first_page == self.last_page:
-            return f"p.{self.first_page}"
-        return f"pp.{self.first_page}-{self.last_page}"
+        return page_label(self.pages)
 
 
-def allocate_pages(items: list[ClaimItem], page_count: int) -> list[ClaimItem]:
-    """Lay a source's claim items out over its pages, one receipt per page.
+def page_label(pages: list[int]) -> str:
+    """Name a set of pages: 'p.4', 'pp.1-2', or 'pp.1, 2 and 4' when one is skipped."""
+    if not pages:
+        return "no pages"
+    if len(pages) == 1:
+        return f"p.{pages[0]}"
+    if pages == list(range(pages[0], pages[-1] + 1)):
+        return f"pp.{pages[0]}-{pages[-1]}"
+    listed = ", ".join(str(p) for p in pages[:-1])
+    return f"pp.{listed} and {pages[-1]}"
 
-    Items are sorted by where they start and placed in that order, each
-    beginning no earlier than the page after the one before it and leaving a
-    page for every item still to come.  Overlaps therefore resolve by pushing
-    the later item forward and, where that would run off the end, by shrinking
-    the earlier one.  Gaps are allowed: a blank back page belongs to no receipt
-    and simply stays out of the bundle.  The one case that cannot be honoured
-    is more items than pages; the surplus piles onto the last page rather than
-    being silently dropped.
 
-    A ``pinned`` item is left exactly where it was put - clamped to the
-    document, but never moved, and taking no part in the sweep.  That is the
-    escape hatch for a page holding two receipts: pin them and they both keep
-    it.  Automatic items lay themselves out as though the pinned ones were not
-    there, so pinning one row never shunts the rest around.
+def pages_of(item: ClaimItem, source: Source) -> list[int]:
+    """The pages of a claim item that actually reach the bundle.
 
-    The list is returned in page order, and the items are updated in place.
+    A page the user has since taken out of the claim - the blank reverse of a
+    two-sided invoice, say - drops out here rather than having to be unpicked
+    from every receipt that names it.
     """
-    ordered = sorted(items, key=lambda i: (i.first_page, i.last_page))
-    bound = max(page_count, 1)
-    remaining = sum(1 for i in ordered if not i.pinned)
-    cursor = 1
-    for item in ordered:
-        if item.pinned:
-            item.first_page = min(max(item.first_page, 1), bound)
-            item.last_page = min(max(item.last_page, item.first_page), bound)
-            continue
-        # Every automatic item after this one still needs a page of its own.
-        remaining -= 1
-        ceiling = max(1, bound - remaining)
-        first = min(max(item.first_page, cursor), ceiling)
-        last = min(max(item.last_page, first), ceiling)
-        item.first_page, item.last_page = first, last
-        cursor = last + 1
-    return ordered
+    return [p for p in item.pages if not source.is_ignored(p)]
 
 
 @dataclass

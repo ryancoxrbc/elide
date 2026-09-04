@@ -19,6 +19,7 @@ from flask import (
     send_file,
     url_for,
 )
+from werkzeug.serving import make_server
 
 from .build import run_build
 from .filebrowser import (
@@ -28,9 +29,17 @@ from .filebrowser import (
     recent_folders,
     remember_folder,
 )
+from .lifetime import Lifetime
 from .matching import find_candidates, suggest_amounts
-from .models import ClaimItem, Match, Source, allocate_pages, format_amount
-from .project import ClaimProject, discover_pdfs, guess_statement
+from .models import (
+    ClaimItem,
+    Match,
+    Source,
+    format_amount,
+    page_label,
+    pages_of,
+)
+from .project import ClaimProject, all_pages, discover_pdfs, guess_statement
 from .redact import build_plan
 from .render import page_count, page_png
 from .statement import parse_statement
@@ -42,10 +51,14 @@ app.secret_key = secrets.token_hex(32)
 # The active claim folder, set on the first screen.
 STATE: dict[str, object] = {"project": None, "pages": None}
 
+# The open browser windows, so closing the last one ends the run. Counted only
+# while the server is actually serving; main() is what starts it watching.
+LIFETIME = Lifetime()
+
 
 # Screens after the first need a chosen claim folder; send the user back if
 # they deep-link or restart the server mid-run.
-OPEN_ENDPOINTS = {"index", "static", "api_browse", "api_pick"}
+OPEN_ENDPOINTS = {"index", "static", "api_browse", "api_pick", "alive"}
 
 
 @app.before_request
@@ -122,7 +135,7 @@ def index():
         remember_folder(path)
         STATE["project"] = proj
         STATE["pages"] = None
-        return redirect(url_for("receipts"))
+        return redirect(url_for("split"))
 
     if not proj.statement:
         proj.statement = guess_statement(path, names)
@@ -153,6 +166,21 @@ def api_browse():
     return jsonify(list_dir(request.args.get("path") or str(Path.home())))
 
 
+@app.route("/alive")
+def alive():
+    """The stream every page holds open for as long as it is on screen.
+
+    Closing the last window ends the run - see lifetime.py. It is deliberately
+    a stream and not a heartbeat: browsers throttle a background tab's timers,
+    and a tab in the background is still a window that is open.
+    """
+    return Response(
+        LIFETIME.stream(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.route("/api/pick", methods=["POST"])
 def api_pick():
     """Open the desktop's own folder chooser and report what was picked."""
@@ -164,100 +192,136 @@ def api_pick():
 # ------------------------------------------------------------------ step 2
 
 
-@app.route("/receipts", methods=["GET", "POST"])
-def receipts():
-    """One PDF can be several receipts, or one receipt can span several pages.
+@app.route("/split", methods=["GET", "POST"])
+def split():
+    """Step 2: cut each PDF into the receipts inside it, and drop unwanted pages.
 
-    Each included source gets its own set of claim items - page ranges with an
-    amount - edited as a variable number of rows. The form submits, per source,
-    a ``rows::<path>`` list of row ids and then ``<field>::<path>::<row id>``
-    for each row, so a row added or removed in the browser needs no extra round
-    trip: it is only reconciled against ``proj.items`` on submit.
+    Only structure is decided here - which pages make up which receipt - so the
+    next step can put one card in front of you per receipt rather than per
+    document. The form submits, per source, a ``rows::<path>`` list of receipt
+    ids and then ``pages::<path>::<row id>`` naming that receipt's pages, so a
+    receipt added or removed in the browser needs no extra round trip: it is
+    reconciled against ``proj.items`` on submit, and a known id keeps its item
+    and therefore its amount, label and confirmed match.
 
-    Ranges are then laid out by ``allocate_pages`` so no two receipts claim the
-    same page unless a row is pinned, which takes its range as typed. The
-    browser does the same as you type, so this normally only confirms what the
-    form already shows - but it is what actually holds the rule, for a submit
-    with scripting off or a hand-posted form.
+    Receipts may share a page and may leave one to nobody; both are said by
+    pointing at the pages, so there is nothing to lay out here. A receipt left
+    with no pages at all is how one is deleted. Ignoring a page is immediate,
+    like rotating one.
     """
     proj = project()
 
     if request.method == "POST":
         for src in proj.included_sources():
             row_ids = [r for r in (request.form.get(f"rows::{src.path}") or "").split(",") if r]
-            bound = max(src.page_count, 1)
             new_items = []
             for rid in row_ids:
-                def field(name: str, default: str = "") -> str:
-                    return (request.form.get(f"{name}::{src.path}::{rid}") or default).strip()
-
-                first = _clamp_int(field("first", "1"), 1, bound, default=1)
-                last = _clamp_int(field("last", str(first)), first, bound, default=first)
+                pages = _page_list(request.form.get(f"pages::{src.path}::{rid}"), src.page_count)
+                if not pages:
+                    continue  # a receipt with nothing in it is a deleted receipt
 
                 existing = proj.item(rid)
                 item = existing if (existing and existing.source == src.path) else ClaimItem(source=src.path)
-                item.first_page, item.last_page = first, last
-                # A checkbox is absent from the form when it is not ticked.
-                item.pinned = field("pin") == "on"
-                item.amount = field("amount")
-                item.label = field("label")
-                item.note = field("note")
+                item.pages = pages
                 new_items.append(item)
 
-            ordered = allocate_pages(new_items, bound)  # in page order, non-overlapping
-            proj.items = [i for i in proj.items if i.source != src.path] + ordered
+            new_items.sort(key=lambda i: i.pages[0])  # document order, so the bundle reads straight
+            proj.items = [i for i in proj.items if i.source != src.path] + new_items
 
         valid_keys = {i.key for i in proj.items}
         proj.matches = {k: v for k, v in proj.matches.items() if k in valid_keys}
         proj.save()
+        return redirect(url_for("amounts"))
+
+    proj.ensure_items()
+    groups = [
+        {
+            "source": src,
+            "pages": all_pages(src),
+            "receipts": proj.items_for(src.path),
+        }
+        for src in proj.included_sources()
+    ]
+    proj.save()  # persist any default items ensure_items just created
+    return render_template("split.html", project=proj, groups=groups)
+
+
+def _page_list(text: str | None, page_count: int) -> list[int]:
+    """Read a submitted page list: ascending, without repeats, inside the document.
+
+    Anything that is not a page of this source is dropped rather than clamped:
+    the list says which thumbnails were clicked, so a number that names no
+    thumbnail means nothing.
+    """
+    bound = max(page_count, 1)
+    pages = set()
+    for part in (text or "").split(","):
+        try:
+            page = int(part)
+        except ValueError:
+            continue
+        if 1 <= page <= bound:
+            pages.add(page)
+    return sorted(pages)
+
+
+# ------------------------------------------------------------------ step 3
+
+
+@app.route("/amounts", methods=["GET", "POST"])
+def amounts():
+    """Step 3: one card per receipt - what it cost, who it was, any note.
+
+    The pages are settled by now, so each card can show the receipt itself,
+    page by page, beside the fields. Items are addressed by their own id here
+    rather than by source and row, since a receipt is the unit on this screen.
+    """
+    proj = project()
+
+    if request.method == "POST":
+        for item in proj.included_items():
+            def field(name: str) -> str:
+                return (request.form.get(f"{name}::{item.key}") or "").strip()
+
+            item.amount = field("amount")
+            item.label = field("label")
+            item.note = field("note")
+        proj.save()
         return redirect(url_for("match"))
 
-    groups = []
+    proj.ensure_items()
+    cards = []
     for src in proj.included_sources():
-        proj.ensure_default_item(src)
-        rows = [
-            {"item": it, "suggestions": suggest_amounts(str(proj.abs_path(src.path)), pages=it.pages)}
-            for it in proj.items_for(src.path)
-        ]
-        groups.append(
-            {
-                "source": src,
-                "pages": list(range(1, max(src.page_count, 1) + 1)),
-                "rows": rows,
-                "no_text": not any(r["suggestions"] for r in rows),
-                "default_label": Path(src.path).stem.replace("_", " "),
-            }
-        )
-    proj.save()  # persist any default items ensure_default_item just created
-    return render_template("receipts.html", project=proj, groups=groups)
+        for item in proj.items_for(src.path):
+            pages = pages_of(item, src)
+            cards.append(
+                {
+                    "item": item,
+                    "source": src,
+                    "pages": pages,
+                    "page_label": page_label(pages),
+                    "suggestions": suggest_amounts(str(proj.abs_path(src.path)), pages=pages),
+                    "default_label": Path(src.path).stem.replace("_", " "),
+                }
+            )
+    proj.save()
+    return render_template("amounts.html", project=proj, cards=cards)
 
 
-def _clamp_int(text: str, low: int, high: int, *, default: int) -> int:
-    try:
-        value = int(text)
-    except (TypeError, ValueError):
-        return default
-    return max(low, min(value, high))
+@app.route("/ignore/<path:name>/<int:page>", methods=["POST"])
+def ignore_page(name: str, page: int):
+    """Take one page in or out of the claim, and report which it now is.
 
-
-@app.route("/api/amounts/<path:name>")
-def api_amounts(name: str):
-    """Amount chips for one page range.
-
-    Splitting a receipt off changes what its neighbour covers, so the chips
-    have to follow the range - otherwise a figure read off page 3 stays on
-    offer for a receipt that now ends at page 1.
+    Immediate, like rotating: a blank separator sheet is noise, and making the
+    user save the whole form to say so would be worse than the noise.
     """
     proj = project()
     src = proj.source(name)
-    if src is None or not proj.abs_path(name).exists():
+    if src is None or not 1 <= page <= max(src.page_count, 1):
         abort(404)
-    bound = max(src.page_count, 1)
-    first = _clamp_int(request.args.get("first", "1"), 1, bound, default=1)
-    last = _clamp_int(request.args.get("last", str(first)), first, bound, default=first)
-    return jsonify(
-        {"amounts": suggest_amounts(str(proj.abs_path(name)), pages=list(range(first, last + 1)))}
-    )
+    ignored = src.toggle_ignored(page)
+    proj.save()
+    return jsonify({"ignored": ignored})
 
 
 @app.route("/rotate/<path:name>/<int:page>", methods=["POST"])
@@ -288,7 +352,7 @@ def doc_page(name: str, number: int):
     return Response(page_png(target, number, dpi=dpi, rotation=rotation), mimetype="image/png")
 
 
-# ------------------------------------------------------------------ step 3
+# ------------------------------------------------------------------ step 4
 
 
 @app.route("/match", methods=["GET", "POST"])
@@ -348,7 +412,7 @@ def match():
     return render_template("match.html", project=proj, groups=groups)
 
 
-# ------------------------------------------------------------------ step 4
+# ------------------------------------------------------------------ step 5
 
 
 @app.route("/preview", methods=["GET", "POST"])
@@ -412,7 +476,7 @@ def statement_page_image(number: int):
     return Response(page_png(path, number, dpi=dpi), mimetype="image/png")
 
 
-# ------------------------------------------------------------------ step 5
+# ------------------------------------------------------------------ step 6
 
 
 @app.route("/build", methods=["GET", "POST"])
@@ -429,6 +493,18 @@ def build():
         bundle_name=proj.bundle_path.name,
         bundle_exists=proj.bundle_path.exists(),
     )
+
+
+@app.route("/close", methods=["POST"])
+def close_run():
+    """The Close button on the last step: the bundle is built and we are done.
+
+    The page lets go of its stream at the same time, which would end the run a
+    few seconds later on its own; saying so outright is what makes the terminal
+    come back the moment the button is pressed.
+    """
+    LIFETIME.finish(lambda: print("\n  Finished - stopping.\n", flush=True))
+    return "", 204
 
 
 @app.route("/download")
@@ -470,10 +546,18 @@ def main() -> None:
 
     app.config["START_FOLDER"] = str(Path(args.folder).expanduser().resolve())
     url = f"http://127.0.0.1:{args.port}/"
-    print(f"\n  Claims Processor\n  claim folder : {app.config['START_FOLDER']}\n  open         : {url}\n")
+    print(
+        f"\n  Claims Processor\n  claim folder : {app.config['START_FOLDER']}"
+        f"\n  open         : {url}\n  stop         : close the window, or Ctrl-C\n",
+        flush=True,
+    )
     if not args.no_browser:
         _open_ui(url)
-    app.run(host="127.0.0.1", port=args.port, debug=False)
+
+    # Served through Lifetime rather than app.run, so that closing the last
+    # window has a server object to stop - see lifetime.py.
+    server = make_server("127.0.0.1", args.port, app, threaded=True)
+    LIFETIME.serve(server, lambda: print("\n  Window closed - stopping.\n", flush=True))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ from claims_processor.models import ClaimItem, Match, Source
 
 def test_bundle_contains_index_statement_and_receipts(statement_pdf, receipt_pdf, tmp_path):
     source = Source(path=receipt_pdf.name, page_count=1)
-    item = ClaimItem(source=source.path, first_page=1, last_page=1, label="Harborlight", amount="1322.98")
+    item = ClaimItem(source=source.path, pages=[1], label="Harborlight", amount="1322.98")
     match = Match(
         item_key=item.key,
         page=1,
@@ -60,8 +60,7 @@ def test_a_long_name_and_description_still_print_in_full_rows(statement_pdf, rec
     source = Source(path=long_name.name, page_count=1)
     item = ClaimItem(
         source=source.path,
-        first_page=1,
-        last_page=1,
+        pages=[1],
         label="Woolworths Food Sandton City Superstore Branch 4471",
         amount="1322.98",
     )
@@ -98,7 +97,7 @@ def test_a_long_name_and_description_still_print_in_full_rows(statement_pdf, rec
 
 def test_an_unmatched_claim_says_so(statement_pdf, receipt_pdf, tmp_path):
     source = Source(path=receipt_pdf.name, page_count=1)
-    item = ClaimItem(source=source.path, first_page=1, last_page=1, label="Vet", amount="10.00")
+    item = ClaimItem(source=source.path, pages=[1], label="Vet", amount="10.00")
     not_found = Match(
         item_key=item.key,
         page=0,
@@ -130,8 +129,7 @@ def test_a_summary_too_long_for_one_page_repeats_the_column_headings(
     for n in range(40):
         item = ClaimItem(
             source=source.path,
-            first_page=1,
-            last_page=1,
+            pages=[1],
             label=f"Supplier {n} trading as a name long enough to need two lines",
             amount="100.00",
         )
@@ -164,7 +162,7 @@ def test_receipt_pages_are_normalised_to_a4(statement_pdf, receipt_pdf, tmp_path
     doc.close()
 
     source = Source(path=letter.name, page_count=1)
-    item = ClaimItem(source=source.path, first_page=1, last_page=1, amount="10.00")
+    item = ClaimItem(source=source.path, pages=[1], amount="10.00")
     out = tmp_path / "bundle.pdf"
     build_bundle(
         out,
@@ -188,8 +186,8 @@ def test_one_pdf_can_hold_two_separate_receipts(receipt_pdf, statement_pdf, tmp_
     doc.close()
 
     source = Source(path=scan.name, page_count=2)
-    item_a = ClaimItem(source=source.path, first_page=1, last_page=1, label="A", amount="100.00")
-    item_b = ClaimItem(source=source.path, first_page=2, last_page=2, label="B", amount="200.00")
+    item_a = ClaimItem(source=source.path, pages=[1], label="A", amount="100.00")
+    item_b = ClaimItem(source=source.path, pages=[2], label="B", amount="200.00")
     assert item_a.key != item_b.key  # distinct ids even though the source is shared
 
     out = tmp_path / "bundle.pdf"
@@ -206,6 +204,33 @@ def test_one_pdf_can_hold_two_separate_receipts(receipt_pdf, statement_pdf, tmp_
         assert "Invoice B" in bundle[-1].get_text("text")
 
 
+def test_an_ignored_page_never_reaches_the_bundle(statement_pdf, tmp_path):
+    """A blank reverse side inside a receipt's range is skipped, not placed."""
+    doc = pymupdf.open()
+    for text in ("Invoice front", "this side intentionally blank", "Invoice back"):
+        doc.new_page(width=595, height=842).insert_text((72, 100), text)
+    scan = tmp_path / "scan.pdf"
+    doc.save(scan)
+    doc.close()
+
+    source = Source(path=scan.name, page_count=3, ignored=[2])
+    item = ClaimItem(source=source.path, pages=[1, 2, 3], amount="50.00")
+    out = tmp_path / "bundle.pdf"
+    summary = build_bundle(
+        out,
+        redacted_statement=statement_pdf,
+        entries=[BundleEntry(item, source, None)],
+        claim_folder=tmp_path,
+        include_index=False,
+    )
+
+    assert summary["receipt_pages"] == 2
+    with pymupdf.open(out) as bundle:
+        text = " ".join(bundle[i].get_text("text") for i in range(len(bundle)))
+    assert "Invoice front" in text and "Invoice back" in text
+    assert "intentionally blank" not in text
+
+
 def test_a_receipt_spanning_several_pages_places_them_all(statement_pdf, tmp_path):
     doc = pymupdf.open()
     for i in range(3):
@@ -215,7 +240,7 @@ def test_a_receipt_spanning_several_pages_places_them_all(statement_pdf, tmp_pat
     doc.close()
 
     source = Source(path=multi.name, page_count=3)
-    item = ClaimItem(source=source.path, first_page=1, last_page=3, amount="50.00")
+    item = ClaimItem(source=source.path, pages=[1, 2, 3], amount="50.00")
     out = tmp_path / "bundle.pdf"
     summary = build_bundle(
         out,
@@ -240,7 +265,7 @@ def test_rotation_is_looked_up_per_page(statement_pdf, tmp_path):
     assert source.rotation_of(1) == 90
     assert source.rotation_of(2) == 0
 
-    item = ClaimItem(source=source.path, first_page=1, last_page=2, amount="1.00")
+    item = ClaimItem(source=source.path, pages=[1, 2], amount="1.00")
     out = tmp_path / "bundle.pdf"
     summary = build_bundle(
         out,
@@ -275,7 +300,7 @@ def test_bundle_rotation_matches_web_preview(statement_pdf, tmp_path):
     doc.close()
 
     source = Source(path=receipt.name, page_count=1, rotations={"1": 90})
-    item = ClaimItem(source=source.path, first_page=1, last_page=1, amount="1.00")
+    item = ClaimItem(source=source.path, pages=[1], amount="1.00")
     out = tmp_path / "bundle.pdf"
     build_bundle(
         out,

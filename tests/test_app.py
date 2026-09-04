@@ -53,192 +53,208 @@ def _start(client, folder):
     )
 
 
-def test_a_fresh_source_gets_one_default_item_spanning_all_pages(client, claim_folder):
+def test_a_fresh_source_gets_one_default_item_holding_all_its_pages(client, claim_folder):
     _start(client, claim_folder)
-    r = client.get("/receipts")
+    r = client.get("/split")
     assert r.status_code == 200
 
     proj = ClaimProject.load(claim_folder)
     items = proj.items_for("scan.pdf")
     assert len(items) == 1
-    assert (items[0].first_page, items[0].last_page) == (1, 2)
+    assert items[0].pages == [1, 2]
 
 
-def test_splitting_a_source_into_two_rows_persists_two_items(client, claim_folder):
+def test_cutting_a_source_into_two_receipts_persists_two_items(client, claim_folder):
     _start(client, claim_folder)
-    client.get("/receipts")  # create the default item
+    client.get("/split")  # create the default item
 
     r = client.post(
-        "/receipts",
+        "/split",
         data={
             "rows::scan.pdf": "new0,new1",
-            "first::scan.pdf::new0": "1", "last::scan.pdf::new0": "1",
-            "amount::scan.pdf::new0": "100.00", "label::scan.pdf::new0": "Receipt A",
-            "note::scan.pdf::new0": "",
-            "first::scan.pdf::new1": "2", "last::scan.pdf::new1": "2",
-            "amount::scan.pdf::new1": "200.00", "label::scan.pdf::new1": "Receipt B",
-            "note::scan.pdf::new1": "",
+            "pages::scan.pdf::new0": "1",
+            "pages::scan.pdf::new1": "2",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 302
+    assert r.headers["Location"] == "/amounts"
+
+    proj = ClaimProject.load(claim_folder)
+    items = proj.items_for("scan.pdf")
+    assert [i.pages for i in items] == [[1], [2]]
+    assert items[0].key != items[1].key
+
+
+def test_two_receipts_may_be_given_the_same_page(client, claim_folder):
+    """Two till slips on one scanned sheet: the page is picked for both."""
+    _start(client, claim_folder)
+    client.get("/split")
+
+    client.post(
+        "/split",
+        data={
+            "rows::scan.pdf": "new0,new1",
+            "pages::scan.pdf::new0": "1",
+            "pages::scan.pdf::new1": "1,2",
+        },
+    )
+
+    items = ClaimProject.load(claim_folder).items_for("scan.pdf")
+    assert [i.pages for i in items] == [[1], [1, 2]]
+
+
+def test_a_receipt_may_be_given_pages_that_do_not_run_on(client, claim_folder):
+    _start(client, claim_folder)
+    client.get("/split")
+    client.post("/split", data={"rows::scan.pdf": "new0",
+                                "pages::scan.pdf::new0": "2,1"})
+
+    item = ClaimProject.load(claim_folder).items_for("scan.pdf")[0]
+    assert item.pages == [1, 2]  # ascending and deduped, whatever order they were clicked in
+
+
+def test_receipts_are_stored_in_page_order(client, claim_folder):
+    _start(client, claim_folder)
+    client.get("/split")
+
+    client.post(
+        "/split",
+        data={
+            "rows::scan.pdf": "new0,new1",
+            "pages::scan.pdf::new0": "2",
+            "pages::scan.pdf::new1": "1",
+        },
+    )
+
+    items = ClaimProject.load(claim_folder).items_for("scan.pdf")
+    assert [i.pages for i in items] == [[1], [2]]
+
+
+def test_a_page_that_is_not_in_the_document_is_dropped(client, claim_folder):
+    """Nothing to clamp to: the list names thumbnails, and these name none."""
+    _start(client, claim_folder)
+    client.get("/split")
+    client.post("/split", data={"rows::scan.pdf": "new0",
+                                "pages::scan.pdf::new0": "0,1,2,999,x"})
+
+    item = ClaimProject.load(claim_folder).items_for("scan.pdf")[0]
+    assert item.pages == [1, 2]
+
+
+def test_a_receipt_left_with_no_pages_is_removed(client, claim_folder):
+    _start(client, claim_folder)
+    client.get("/split")
+    client.post(
+        "/split",
+        data={
+            "rows::scan.pdf": "new0,new1",
+            "pages::scan.pdf::new0": "1,2",
+            "pages::scan.pdf::new1": "",
+        },
+    )
+
+    items = ClaimProject.load(claim_folder).items_for("scan.pdf")
+    assert [i.pages for i in items] == [[1, 2]]
+
+
+def test_re_cutting_a_receipt_keeps_its_id_and_its_amount(client, claim_folder):
+    """The id is what a confirmed match hangs off, so it must survive an edit."""
+    _start(client, claim_folder)
+    client.get("/split")
+    client.post("/split", data={"rows::scan.pdf": "new0",
+                                "pages::scan.pdf::new0": "1"})
+
+    only = ClaimProject.load(claim_folder).items_for("scan.pdf")[0]
+    client.post("/amounts", data={f"amount::{only.key}": "100.00"})
+    client.post("/split", data={"rows::scan.pdf": only.key,
+                                f"pages::scan.pdf::{only.key}": "1,2"})
+
+    again = ClaimProject.load(claim_folder).items_for("scan.pdf")[0]
+    assert again.key == only.key
+    assert again.pages == [1, 2]
+    assert again.amount == "100.00"
+
+
+def test_each_receipt_is_offered_only_the_amounts_on_its_own_pages(client, claim_folder):
+    """Receipt A's R100 is on page 1 and receipt B's R200 on page 2."""
+    _start(client, claim_folder)
+    client.get("/split")
+    client.post(
+        "/split",
+        data={
+            "rows::scan.pdf": "new0,new1",
+            "pages::scan.pdf::new0": "1",
+            "pages::scan.pdf::new1": "2",
+        },
+    )
+
+    page = client.get("/amounts").get_data(as_text=True)
+    first, second = page.split("Receipt 2")
+    assert "R 100.00" in first and "R 200.00" not in first
+    assert "R 200.00" in second and "R 100.00" not in second
+
+
+def test_the_amounts_step_stores_what_was_typed_against_each_receipt(client, claim_folder):
+    _start(client, claim_folder)
+    client.get("/split")
+    client.post(
+        "/split",
+        data={
+            "rows::scan.pdf": "new0,new1",
+            "pages::scan.pdf::new0": "1",
+            "pages::scan.pdf::new1": "2",
+        },
+    )
+    ids = [i.id for i in ClaimProject.load(claim_folder).items_for("scan.pdf")]
+
+    r = client.post(
+        "/amounts",
+        data={
+            f"amount::{ids[0]}": "100.00", f"label::{ids[0]}": "Receipt A",
+            f"note::{ids[0]}": "first slip",
+            f"amount::{ids[1]}": "200.00", f"label::{ids[1]}": "Receipt B",
+            f"note::{ids[1]}": "",
         },
         follow_redirects=False,
     )
     assert r.status_code == 302
     assert r.headers["Location"] == "/match"
 
-    proj = ClaimProject.load(claim_folder)
-    items = sorted(proj.items_for("scan.pdf"), key=lambda i: i.first_page)
-    assert [(i.first_page, i.last_page, i.label) for i in items] == [
-        (1, 1, "Receipt A"),
-        (2, 2, "Receipt B"),
+    items = ClaimProject.load(claim_folder).items_for("scan.pdf")
+    assert [(i.amount, i.label, i.note) for i in items] == [
+        ("100.00", "Receipt A", "first slip"),
+        ("200.00", "Receipt B", ""),
     ]
-    assert items[0].key != items[1].key
+    # The pages are untouched by this step.
+    assert [i.pages for i in items] == [[1], [2]]
 
 
-def test_two_rows_claiming_the_whole_document_are_split_between_them(client, claim_folder):
-    """The rule holds on the server, not only in the browser.
-
-    A submit with scripting off - or a hand-posted form - can still name the
-    same pages twice; laying the ranges out again is what keeps a page from
-    entering the bundle under two different receipts.
-    """
-    _start(client, claim_folder)
-    client.get("/receipts")
-
-    client.post(
-        "/receipts",
-        data={
-            "rows::scan.pdf": "new0,new1",
-            "first::scan.pdf::new0": "1", "last::scan.pdf::new0": "2",
-            "amount::scan.pdf::new0": "100.00", "label::scan.pdf::new0": "Receipt A",
-            "note::scan.pdf::new0": "",
-            "first::scan.pdf::new1": "1", "last::scan.pdf::new1": "2",
-            "amount::scan.pdf::new1": "200.00", "label::scan.pdf::new1": "Receipt B",
-            "note::scan.pdf::new1": "",
-        },
-    )
-
-    items = ClaimProject.load(claim_folder).items_for("scan.pdf")
-    assert [(i.first_page, i.last_page, i.label) for i in items] == [
-        (1, 1, "Receipt A"),
-        (2, 2, "Receipt B"),
-    ]
-
-
-def test_rows_are_stored_in_page_order(client, claim_folder):
-    _start(client, claim_folder)
-    client.get("/receipts")
-
-    client.post(
-        "/receipts",
-        data={
-            "rows::scan.pdf": "new0,new1",
-            "first::scan.pdf::new0": "2", "last::scan.pdf::new0": "2",
-            "amount::scan.pdf::new0": "200.00", "label::scan.pdf::new0": "Second",
-            "note::scan.pdf::new0": "",
-            "first::scan.pdf::new1": "1", "last::scan.pdf::new1": "1",
-            "amount::scan.pdf::new1": "100.00", "label::scan.pdf::new1": "First",
-            "note::scan.pdf::new1": "",
-        },
-    )
-
-    items = ClaimProject.load(claim_folder).items_for("scan.pdf")
-    assert [i.label for i in items] == ["First", "Second"]
-
-
-def test_a_page_range_is_clamped_to_the_document(client, claim_folder):
-    _start(client, claim_folder)
-    client.get("/receipts")
-    client.post(
-        "/receipts",
-        data={
-            "rows::scan.pdf": "new0",
-            "first::scan.pdf::new0": "0", "last::scan.pdf::new0": "999",
-            "amount::scan.pdf::new0": "5.00", "label::scan.pdf::new0": "",
-            "note::scan.pdf::new0": "",
-        },
-    )
-    item = ClaimProject.load(claim_folder).items_for("scan.pdf")[0]
-    assert (item.first_page, item.last_page) == (1, 2)
-
-
-def test_a_row_set_by_hand_keeps_a_page_it_shares(client, claim_folder):
-    """Two till slips on one scanned sheet: both rows pinned to page 1."""
-    _start(client, claim_folder)
-    client.get("/receipts")
-
-    client.post(
-        "/receipts",
-        data={
-            "rows::scan.pdf": "new0,new1",
-            "first::scan.pdf::new0": "1", "last::scan.pdf::new0": "1",
-            "pin::scan.pdf::new0": "on",
-            "amount::scan.pdf::new0": "100.00", "label::scan.pdf::new0": "Slip A",
-            "note::scan.pdf::new0": "",
-            "first::scan.pdf::new1": "1", "last::scan.pdf::new1": "1",
-            "pin::scan.pdf::new1": "on",
-            "amount::scan.pdf::new1": "200.00", "label::scan.pdf::new1": "Slip B",
-            "note::scan.pdf::new1": "",
-        },
-    )
-
-    items = ClaimProject.load(claim_folder).items_for("scan.pdf")
-    assert [(i.first_page, i.last_page, i.label) for i in items] == [
-        (1, 1, "Slip A"),
-        (1, 1, "Slip B"),
-    ]
-    assert all(i.pinned for i in items)
-
-
-def test_an_unticked_box_puts_the_row_back_under_the_layout(client, claim_folder):
-    _start(client, claim_folder)
-    client.get("/receipts")
-
-    shared = {
-        "rows::scan.pdf": "new0,new1",
-        "first::scan.pdf::new0": "1", "last::scan.pdf::new0": "1",
-        "amount::scan.pdf::new0": "100.00", "label::scan.pdf::new0": "Slip A",
-        "note::scan.pdf::new0": "",
-        "first::scan.pdf::new1": "1", "last::scan.pdf::new1": "1",
-        "amount::scan.pdf::new1": "200.00", "label::scan.pdf::new1": "Slip B",
-        "note::scan.pdf::new1": "",
-    }
-    client.post("/receipts", data={**shared, "pin::scan.pdf::new0": "on",
-                                   "pin::scan.pdf::new1": "on"})
-    ids = [i.id for i in ClaimProject.load(claim_folder).items_for("scan.pdf")]
-
-    # Re-submit the same rows with neither box ticked.
-    again = dict(shared)
-    again["rows::scan.pdf"] = ",".join(ids)
-    for old_key, new_key in zip(("new0", "new1"), ids):
-        for name in ("first", "last", "amount", "label", "note"):
-            again[f"{name}::scan.pdf::{new_key}"] = again.pop(f"{name}::scan.pdf::{old_key}")
-    client.post("/receipts", data=again)
-
-    items = ClaimProject.load(claim_folder).items_for("scan.pdf")
-    assert [(i.first_page, i.last_page) for i in items] == [(1, 1), (2, 2)]
-    assert not any(i.pinned for i in items)
-
-
-def test_amount_chips_are_scoped_to_the_page_range_asked_for(client, claim_folder):
-    """Splitting a receipt off moves the figures with the pages.
-
-    Receipt A's R100 is on page 1 and receipt B's R200 on page 2, so a range
-    must only ever offer what its own pages say.
-    """
+def test_ignoring_a_page_takes_it_in_and_out_of_the_claim(client, claim_folder):
     _start(client, claim_folder)
 
-    assert client.get("/api/amounts/scan.pdf?first=1&last=1").get_json() == {
-        "amounts": ["100.00"]
-    }
-    assert client.get("/api/amounts/scan.pdf?first=2&last=2").get_json() == {
-        "amounts": ["200.00"]
-    }
-    both = client.get("/api/amounts/scan.pdf?first=1&last=2").get_json()["amounts"]
-    assert sorted(both) == ["100.00", "200.00"]
+    assert client.post("/ignore/scan.pdf/2").get_json() == {"ignored": True}
+    assert ClaimProject.load(claim_folder).source("scan.pdf").ignored == [2]
+
+    assert client.post("/ignore/scan.pdf/2").get_json() == {"ignored": False}
+    assert ClaimProject.load(claim_folder).source("scan.pdf").ignored == []
 
 
-def test_amount_chips_for_an_unknown_document_are_rejected(client, claim_folder):
+def test_ignoring_a_page_outside_the_document_is_rejected(client, claim_folder):
     _start(client, claim_folder)
-    assert client.get("/api/amounts/does-not-exist.pdf?first=1&last=1").status_code == 404
+    assert client.post("/ignore/scan.pdf/99").status_code == 404
+    assert client.post("/ignore/does-not-exist.pdf/1").status_code == 404
+
+
+def test_an_ignored_page_offers_none_of_its_amounts(client, claim_folder):
+    """Page 2 holds receipt B's R200; ignoring it takes the figure with it."""
+    _start(client, claim_folder)
+    client.get("/split")  # one receipt spanning both pages
+    client.post("/ignore/scan.pdf/2")
+
+    page = client.get("/amounts").get_data(as_text=True)
+    assert "R 100.00" in page
+    assert "R 200.00" not in page
 
 
 def test_rotating_a_page_turns_90_anticlockwise_and_reports_the_angle(client, claim_folder):
@@ -273,11 +289,11 @@ def test_rotating_a_page_outside_the_document_is_rejected(client, claim_folder):
 def test_deleting_every_row_leaves_the_source_with_no_items(client, claim_folder):
     """Emptying a source's rows must not crash - the next GET repopulates it."""
     _start(client, claim_folder)
-    client.get("/receipts")
-    client.post("/receipts", data={"rows::scan.pdf": ""})
+    client.get("/split")
+    client.post("/split", data={"rows::scan.pdf": ""})
     assert ClaimProject.load(claim_folder).items_for("scan.pdf") == []
 
-    client.get("/receipts")  # ensure_default_item fires again
+    client.get("/split")  # ensure_default_item fires again
     assert len(ClaimProject.load(claim_folder).items_for("scan.pdf")) == 1
 
 

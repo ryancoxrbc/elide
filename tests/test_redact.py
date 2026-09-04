@@ -141,7 +141,7 @@ def test_a_receipt_sharing_a_removed_date_is_not_a_false_leak(statement_pdf, tmp
     doc.close()
 
     source = Source(path=receipt.name, page_count=1)
-    item = ClaimItem(source=source.path, first_page=1, last_page=1, amount="809.00")
+    item = ClaimItem(source=source.path, pages=[1], amount="809.00")
     bundle = tmp_path / "bundle.pdf"
     summary = build_bundle(
         bundle,

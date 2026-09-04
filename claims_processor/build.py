@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .bundle import BundleEntry, build_bundle
-from .models import format_amount
+from .models import format_amount, page_label, pages_of
 from .project import ClaimProject
 from .redact import RedactionError, apply_plan, build_plan, check_plan
 from .statement import parse_statement
@@ -122,7 +122,9 @@ def _write_report(project, plan, summary, result, run_ocr: bool) -> str:
         amount = format_amount(item.value) if item.value is not None else "(no amount)"
         label = item.label or Path(item.source).stem
         lines.append(f"{amount:>14}  {label}")
-        lines.append(f"{'':>14}  file: {item.source} ({item.page_label})")
+        source = project.source(item.source)
+        where = page_label(pages_of(item, source)) if source else item.page_label
+        lines.append(f"{'':>14}  file: {item.source} ({where})")
         if match and match.confirmed and not match.not_found:
             lines.append(
                 f"{'':>14}  matched: p.{match.page} {match.date} "

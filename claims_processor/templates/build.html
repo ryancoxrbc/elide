@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% set step = 5 %}
+{% set step = 6 %}
 {% block body %}
 <h1>Build and verify</h1>
 
@@ -32,12 +32,51 @@
   <div class="actions">
     <a class="ghost" href="{{ url_for('preview') }}">&larr; Back</a>
     <button type="submit">{% if result %}Rebuild{% else %}Build bundle{% endif %}</button>
+    {% if bundle_exists %}
+      <button type="button" class="closerun" id="closerun"
+              title="Finish: shut the wizard and stop the server">Close</button>
+    {% endif %}
   </div>
 </form>
+
+<div class="card finished" id="finished" hidden>
+  <h2>Finished</h2>
+  <p class="muted">The bundle is in <code>{{ project.output_root.name }}/</code> and the server has
+  stopped. You can close this window.</p>
+</div>
 
 {% if report %}
   <h2>Report</h2>
   <p class="muted">Also saved as <code>{{ project.output_root.name }}/{{ project.report_path.name }}</code> in the claim folder.</p>
   <pre class="report">{{ report }}</pre>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var btn = document.getElementById('closerun');
+  if (!btn) return;
+
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+
+    // Two ways of saying the same thing: letting go of the stream would end
+    // the run on its own after a few seconds, and the request ends it now.
+    if (window.RunStream) window.RunStream.close();
+    fetch("{{ url_for('close_run') }}", {method: 'POST', keepalive: true})
+      .catch(function () {})   // the server going away mid-reply is the point
+      .finally(function () {
+        // An app-mode window closes; a plain tab is not allowed to, so leave
+        // something behind that says the run is over either way.
+        var main = document.querySelector('main');
+        Array.prototype.forEach.call(main.children, function (el) {
+          el.hidden = el.id !== 'finished';
+        });
+        document.getElementById('finished').hidden = false;
+        window.close();
+      });
+  });
+})();
+</script>
 {% endblock %}

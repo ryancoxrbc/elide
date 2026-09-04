@@ -35,7 +35,7 @@ def test_save_and_load_round_trips_sources_items_and_matches(claim_folder):
     proj.statement = "CertifiedStatements.pdf"
     src = Source(path="receipt.pdf", page_count=2, rotations={"1": 270})
     proj.sources.append(src)
-    item = ClaimItem(source=src.path, first_page=1, last_page=2, label="A", amount="10.00")
+    item = ClaimItem(source=src.path, pages=[1, 2], label="A", amount="10.00")
     proj.items.append(item)
     proj.matches[item.key] = Match(
         item_key=item.key,
@@ -67,7 +67,7 @@ def test_ensure_default_item_spans_every_page(claim_folder):
     proj.ensure_default_item(src)
     assert len(proj.items_for(src.path)) == 1
     only = proj.items_for(src.path)[0]
-    assert (only.first_page, only.last_page) == (1, 2)
+    assert only.pages == [1, 2]
 
     # Calling it again must not add a second item once one already exists.
     proj.ensure_default_item(src)
@@ -81,8 +81,8 @@ def test_two_items_of_one_source_get_distinct_keys(claim_folder):
     match confirmed against an item must move with it.
     """
     proj = ClaimProject.load(claim_folder)
-    a = ClaimItem(source="receipt.pdf", first_page=1, last_page=1, amount="1.00")
-    b = ClaimItem(source="receipt.pdf", first_page=2, last_page=2, amount="2.00")
+    a = ClaimItem(source="receipt.pdf", pages=[1], amount="1.00")
+    b = ClaimItem(source="receipt.pdf", pages=[2], amount="2.00")
     proj.items += [a, b]
     proj.matches[a.key] = Match(item_key=a.key, page=1, row_index=0, column="debit",
                                  date="", description="", account="", confirmed=True)
@@ -96,17 +96,16 @@ def test_two_items_of_one_source_get_distinct_keys(claim_folder):
     assert {i.key for i in reloaded.items} == set(reloaded.matches)
 
 
-def test_loading_separates_receipts_that_claim_the_same_page(claim_folder):
-    """A file written before a page belonged to one receipt only.
+def test_two_receipts_may_claim_the_same_page(claim_folder):
+    """Two till slips on one scanned sheet, and the page named by both.
 
-    Left alone, the overlap would put page 1 into the bundle twice - so the
-    ranges are laid out again on load, and the matches ride along on the item
-    ids rather than being lost.
+    Nothing rearranges them on the way in or out: the pages of a receipt are
+    what the user pointed at, so the sheet is simply listed twice.
     """
     proj = ClaimProject.load(claim_folder)
     proj.sources.append(Source(path="receipt.pdf", page_count=2))
-    a = ClaimItem(source="receipt.pdf", first_page=1, last_page=2, amount="1.00")
-    b = ClaimItem(source="receipt.pdf", first_page=1, last_page=2, amount="2.00")
+    a = ClaimItem(source="receipt.pdf", pages=[1], amount="1.00")
+    b = ClaimItem(source="receipt.pdf", pages=[1, 2], amount="2.00")
     proj.items += [a, b]
     proj.matches[b.key] = Match(item_key=b.key, page=1, row_index=1, column="debit",
                                 date="", description="", account="", confirmed=True)
@@ -114,49 +113,49 @@ def test_loading_separates_receipts_that_claim_the_same_page(claim_folder):
 
     reloaded = ClaimProject.load(claim_folder)
     items = reloaded.items_for("receipt.pdf")
-    assert [(i.first_page, i.last_page) for i in items] == [(1, 1), (2, 2)]
+    assert [i.pages for i in items] == [[1], [1, 2]]
     assert [i.amount for i in items] == ["1.00", "2.00"]
     assert set(reloaded.matches) == {b.key}
 
 
-def test_loading_keeps_a_shared_page_that_was_set_by_hand(claim_folder):
-    """The rule is a default, not a cage - a pinned overlap survives a reload."""
+def test_a_receipt_may_skip_a_page_in_the_middle(claim_folder):
+    """Two halves of one invoice with something unrelated filed between them."""
     proj = ClaimProject.load(claim_folder)
-    proj.sources.append(Source(path="receipt.pdf", page_count=2))
-    proj.items += [
-        ClaimItem(source="receipt.pdf", first_page=1, last_page=1, amount="1.00", pinned=True),
-        ClaimItem(source="receipt.pdf", first_page=1, last_page=1, amount="2.00", pinned=True),
-    ]
+    proj.sources.append(Source(path="receipt.pdf", page_count=3))
+    proj.items.append(ClaimItem(source="receipt.pdf", pages=[1, 3], amount="1.00"))
     proj.save()
 
-    items = ClaimProject.load(claim_folder).items_for("receipt.pdf")
-    assert [(i.first_page, i.last_page) for i in items] == [(1, 1), (1, 1)]
-    assert all(i.pinned for i in items)
+    only = ClaimProject.load(claim_folder).items_for("receipt.pdf")[0]
+    assert only.pages == [1, 3]
+    assert only.page_label == "pp.1 and 3"
 
 
-def test_a_project_file_from_before_pinning_loads_unpinned(claim_folder):
+def test_a_project_file_written_as_page_ranges_loads_as_pages(claim_folder):
+    """The shape claim_project.json had while a receipt was a from/to range."""
     proj = ClaimProject.load(claim_folder)
-    proj.sources.append(Source(path="receipt.pdf", page_count=2))
-    proj.items.append(ClaimItem(source="receipt.pdf", first_page=1, last_page=2))
+    proj.sources.append(Source(path="receipt.pdf", page_count=3))
+    proj.items.append(ClaimItem(source="receipt.pdf", pages=[1, 2, 3], label="A"))
     proj.save()
 
     written = json.loads((claim_folder / "claim_project.json").read_text())
     for item in written["items"]:
-        del item["pinned"]
+        del item["pages"]
+        item.update({"first_page": 2, "last_page": 3, "pinned": True})
     (claim_folder / "claim_project.json").write_text(json.dumps(written))
 
     only = ClaimProject.load(claim_folder).items_for("receipt.pdf")[0]
-    assert only.pinned is False
+    assert only.pages == [2, 3]
+    assert only.label == "A"  # the rest of the receipt came through untouched
 
 
 def test_loading_leaves_a_source_with_one_receipt_alone(claim_folder):
     proj = ClaimProject.load(claim_folder)
     proj.sources.append(Source(path="receipt.pdf", page_count=2))
-    proj.items.append(ClaimItem(source="receipt.pdf", first_page=1, last_page=2))
+    proj.items.append(ClaimItem(source="receipt.pdf", pages=[1, 2]))
     proj.save()
 
     only = ClaimProject.load(claim_folder).items_for("receipt.pdf")[0]
-    assert (only.first_page, only.last_page) == (1, 2)
+    assert only.pages == [1, 2]
 
 
 def test_a_legacy_project_file_migrates_cleanly(claim_folder):
@@ -206,7 +205,7 @@ def test_a_legacy_project_file_migrates_cleanly(claim_folder):
 
     assert len(proj.items) == 1
     item = proj.items[0]
-    assert (item.first_page, item.last_page) == (1, 2)
+    assert item.pages == [1, 2]
     assert item.label == "Harborlight"
     assert item.amount == "1,322.98"
 
@@ -234,7 +233,7 @@ def test_migrating_a_missing_pdf_falls_back_to_one_page(claim_folder):
 
     proj = ClaimProject.load(claim_folder)
     assert proj.sources[0].page_count == 1
-    assert proj.items[0].last_page == 1
+    assert proj.items[0].pages == [1]
 
 
 def test_generated_paths_all_sit_in_the_output_subfolder(claim_folder):

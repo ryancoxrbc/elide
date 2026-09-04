@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% set step = 3 %}
+{% block body %}
+<h1>What did each receipt cost?</h1>
+<p class="lede">One card per receipt, with the receipt itself beside the fields &mdash; page
+through it with &#8249; &#8250; and click it to read it full-size. Amounts found in that
+receipt's own pages are offered as chips, best guess first.</p>
+
+{% if not cards %}
+  <p class="warn">No receipts yet &mdash; <a href="{{ url_for('split') }}">go back and separate
+  them</a>.</p>
+{% endif %}
+
+<form method="post">
+{% for c in cards %}
+  {% set it = c.item %}
+  <section class="card receiptcard" data-source="{{ c.source.path }}"
+           data-pages="{{ c.pages|join(',') }}">
+    <div class="receiptview">
+      {% if c.pages %}
+        <div class="receiptframe">
+          <button type="button" class="pagenav prev" title="Previous page (&larr;)">&#8249;</button>
+          <img loading="lazy" alt="{{ it.label or c.source.path }}"
+               src="{{ url_for('doc_page', name=c.source.path, number=c.pages[0]) }}?dpi=170">
+          <button type="button" class="pagenav next" title="Next page (&rarr;)">&#8250;</button>
+        </div>
+        <div class="receiptfoot">
+          <span class="pagecount muted"></span>
+          <button type="button" class="ghost rotatebtn" title="Rotate this page 90&deg; anticlockwise">&#8635;</button>
+        </div>
+      {% else %}
+        <div class="receiptframe empty"><span class="muted">Every page of this receipt is ignored.</span></div>
+      {% endif %}
+    </div>
+
+    <div class="receiptform">
+      <div class="receipthead">
+        <h3>Receipt {{ loop.index }}</h3>
+        <span class="muted">{{ c.source.path }} &middot; {{ c.page_label }}</span>
+      </div>
+
+      <label>Amount claimed
+        <input class="amount" type="text" name="amount::{{ it.id }}" value="{{ it.amount }}"
+               placeholder="0.00" inputmode="decimal" autocomplete="off">
+      </label>
+      {% if c.suggestions %}
+        <div class="chips">
+          {% for s in c.suggestions %}
+            <button type="button" class="chip {% if it.amount == s %}on{% endif %}"
+                    data-amount="{{ s }}">R {{ s }}</button>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="hint">No amounts readable in these pages &mdash; type the figure in.</p>
+      {% endif %}
+
+      <label>Supplier / description
+        <input type="text" name="label::{{ it.id }}" value="{{ it.label }}"
+               placeholder="{{ c.default_label }}">
+      </label>
+      <label>Note <span class="muted">(optional)</span>
+        <input type="text" name="note::{{ it.id }}" value="{{ it.note }}">
+      </label>
+    </div>
+  </section>
+{% endfor %}
+  <div class="actions">
+    <a class="ghost" href="{{ url_for('split') }}">&larr; Back</a>
+    <button type="submit">Find these on the statement &rarr;</button>
+  </div>
+</form>
+
+{% include "_lightbox.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='viewer.js') }}"></script>
+<script>
+(function () {
+  document.querySelectorAll('.receiptcard').forEach(function (card) {
+    var sourcePath = card.dataset.source;
+    var pages = (card.dataset.pages || '').split(',').filter(Boolean).map(Number);
+    var img = card.querySelector('.receiptframe img');
+    if (!img || !pages.length) return;
+
+    var prev = card.querySelector('.pagenav.prev');
+    var next = card.querySelector('.pagenav.next');
+    var count = card.querySelector('.pagecount');
+    var rotateBtn = card.querySelector('.rotatebtn');
+    var at = 0;
+
+    // A one-page receipt is the common case; its pager would be furniture.
+    if (pages.length < 2) {
+      prev.hidden = true;
+      next.hidden = true;
+    }
+
+    function render(bust) {
+      img.src = Viewer.docPageUrl(sourcePath, pages[at], 170, bust);
+      count.textContent = pages.length > 1
+        ? 'Page ' + pages[at] + '  ·  ' + (at + 1) + ' of ' + pages.length
+        : 'Page ' + pages[at];
+      prev.disabled = at <= 0;
+      next.disabled = at >= pages.length - 1;
+    }
+
+    function step(delta) {
+      var target = at + delta;
+      if (target < 0 || target >= pages.length) return;
+      at = target;
+      render();
+    }
+
+    prev.addEventListener('click', function () { step(-1); });
+    next.addEventListener('click', function () { step(1); });
+    img.addEventListener('click', function () {
+      Viewer.open(sourcePath, pages, pages[at], function () { render(true); });
+    });
+    rotateBtn.addEventListener('click', function () {
+      rotateBtn.disabled = true;
+      Viewer.rotate(sourcePath, pages[at])
+        .then(function () { render(true); })
+        .finally(function () { rotateBtn.disabled = false; });
+    });
+
+    // Arrow keys page the card you are typing in, not every card at once.
+    card.addEventListener('keydown', function (e) {
+      if (e.target.tagName === 'INPUT' || pages.length < 2) return;
+      if (e.key === 'ArrowLeft') step(-1);
+      else if (e.key === 'ArrowRight') step(1);
+    });
+
+    card.querySelectorAll('.chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        card.querySelector('.amount').value = chip.dataset.amount;
+        card.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('on'); });
+        chip.classList.add('on');
+      });
+    });
+
+    render();
+  });
+})();
+</script>
+{% endblock %}

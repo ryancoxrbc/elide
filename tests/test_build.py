@@ -13,7 +13,7 @@ def _project(statement_pdf, receipt_pdf) -> ClaimProject:
     proj = ClaimProject(folder=str(folder), statement=statement_pdf.name)
     proj.sources.append(Source(path=receipt_pdf.name, page_count=1))
     proj.items.append(
-        ClaimItem(source=receipt_pdf.name, first_page=1, last_page=1, amount="1322.98")
+        ClaimItem(source=receipt_pdf.name, pages=[1], amount="1322.98")
     )
     return proj
 

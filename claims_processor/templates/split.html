@@ -1,0 +1,375 @@
+{% extends "base.html" %}
+{% set step = 2 %}
+{% block body %}
+<h1>Separate the receipts</h1>
+<p class="lede">Each document starts out as one receipt. If it holds several, turn on
+<b>Multiple receipts</b> and point at the pages: click one, or press and drag along the strip to
+take a run of them, then <b>Done</b>. Add the next receipt and carry on. Every page wears a bubble
+for the receipt it belongs to, and a page can wear two &mdash; that is two till slips scanned onto
+one sheet. Rotate a page with &#8635;, open it full-size with &#9974;, and use &#10005; to leave a
+blank or duplicate page out of the claim altogether. Rotating and ignoring take effect at once, no
+save needed.</p>
+
+<form method="post">
+{% for g in groups %}
+  {% set named = [] %}
+  {% for it in g.receipts if it.label or it.amount %}
+    {% set _ = named.append(it.label or it.amount) %}
+  {% endfor %}
+  <section class="card sourcecard" data-source="{{ g.source.path }}"
+           data-pagecount="{{ g.source.page_count or 1 }}"
+           data-carried="{{ named|join('\n') }}">
+    <div class="sourcehead">
+      <h3>{{ g.source.path }}</h3>
+      <span class="muted">{{ g.pages|length }} page{{ 's' if g.pages|length != 1 else '' }}</span>
+    </div>
+
+    {% if g.pages %}
+      <p class="hint selecthint" hidden>A page belongs to no receipt until you add it to one, so
+      the pages you never pick are left out of the bundle.</p>
+      <div class="pagestrip">
+        {% for p in g.pages %}
+          <div class="pagethumb {% if g.source.is_ignored(p) %}ignored{% endif %}" data-page="{{ p }}">
+            <img loading="lazy" src="{{ url_for('doc_page', name=g.source.path, number=p) }}?dpi=150"
+                 alt="page {{ p }}" data-page="{{ p }}">
+            <span class="bubbles"></span>
+            <span class="pageno">{{ p }}</span>
+            <div class="thumbtools">
+              <button type="button" class="thumbbtn rotatebtn" data-page="{{ p }}"
+                      title="Rotate page {{ p }} 90&deg; anticlockwise">&#8635;</button>
+              <button type="button" class="thumbbtn expandbtn" data-page="{{ p }}"
+                      title="View page {{ p }} full-size">&#9974;</button>
+              <button type="button" class="thumbbtn ignorebtn" data-page="{{ p }}"
+                      aria-pressed="{{ 'true' if g.source.is_ignored(p) else 'false' }}"
+                      title="Leave page {{ p }} out of the claim">&#10005;</button>
+            </div>
+            <span class="ignoredtag">Ignored</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Could not render this document.</p>
+    {% endif %}
+
+    <div class="splitbar">
+      <label class="multitoggle">
+        <input type="checkbox" class="multi"> Multiple receipts
+      </label>
+      <span class="splitstatus muted"></span>
+      <button type="button" class="ghost donebtn" hidden>Done</button>
+      <button type="button" class="ghost addreceipt" hidden>+ Add receipt</button>
+      <button type="button" class="ghost resetsplit" hidden>Reset</button>
+    </div>
+
+    {# Written by the server so a submit with scripting off keeps the split it
+       was shown, and rewritten by the script on every change. #}
+    <div class="assignments">
+      {% for it in g.receipts %}
+        <input type="hidden" name="pages::{{ g.source.path }}::{{ it.id }}"
+               value="{{ it.pages|join(',') }}" data-rid="{{ it.id }}">
+      {% endfor %}
+    </div>
+    <input type="hidden" class="rowlist" name="rows::{{ g.source.path }}"
+           value="{{ g.receipts|map(attribute='id')|join(',') }}">
+  </section>
+{% endfor %}
+  <div class="actions">
+    <a class="ghost" href="{{ url_for('index') }}">&larr; Back</a>
+    <button type="submit">Enter the amounts &rarr;</button>
+  </div>
+</form>
+
+{% include "_lightbox.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='viewer.js') }}"></script>
+<script>
+(function () {
+  var newCounter = 0;
+
+  document.querySelectorAll('.sourcecard').forEach(function (card) {
+    var sourcePath = card.dataset.source;
+    var pageCount = parseInt(card.dataset.pagecount, 10) || 1;
+    var strip = card.querySelector('.pagestrip');
+    var thumbs = Array.prototype.slice.call(card.querySelectorAll('.pagethumb'));
+    var assignments = card.querySelector('.assignments');
+    var rowlist = card.querySelector('.rowlist');
+    var hint = card.querySelector('.selecthint');
+    var status = card.querySelector('.splitstatus');
+    var multi = card.querySelector('.multi');
+    var carried = (card.dataset.carried || '').split('\n').filter(Boolean);
+    var doneBtn = card.querySelector('.donebtn');
+    var addBtn = card.querySelector('.addreceipt');
+    var resetBtn = card.querySelector('.resetsplit');
+    if (!strip) return;  // a document we could not render has nothing to cut up
+
+    // A receipt is {rid, pages} with pages a Set of numbers. `selecting` is the
+    // index of the receipt currently being pointed at, or -1 when none is.
+    var receipts = Array.prototype.map.call(assignments.children, function (input) {
+      return {rid: input.dataset.rid, pages: pageSet(input.value)};
+    });
+    var selecting = -1;
+
+    function pageSet(csv) {
+      var out = {};
+      (csv || '').split(',').forEach(function (part) {
+        var page = parseInt(part, 10);
+        if (page) out[page] = true;
+      });
+      return out;
+    }
+
+    function pagesOf(receipt) {
+      return Object.keys(receipt.pages).map(Number).sort(function (a, b) { return a - b; });
+    }
+
+    function allPages() {
+      var out = {};
+      for (var page = 1; page <= pageCount; page++) out[page] = true;
+      return out;
+    }
+
+    function claimedBy(page) {
+      var numbers = [];
+      receipts.forEach(function (receipt, index) {
+        if (receipt.pages[page]) numbers.push(index + 1);
+      });
+      return numbers;
+    }
+
+    function isIgnored(thumb) {
+      return thumb.classList.contains('ignored');
+    }
+
+    // ---- rendering -------------------------------------------------------
+
+    function paint() {
+      strip.classList.toggle('selecting', selecting >= 0);
+
+      thumbs.forEach(function (thumb) {
+        var page = parseInt(thumb.dataset.page, 10);
+        var owners = claimedBy(page);
+        var bubbles = thumb.querySelector('.bubbles');
+        bubbles.textContent = '';
+        owners.forEach(function (number) {
+          var bubble = document.createElement('span');
+          bubble.className = 'bubble' +
+            (selecting >= 0 && number === selecting + 1 ? ' picking' : '');
+          bubble.textContent = String(number);
+          bubble.title = 'Receipt ' + number;
+          bubbles.appendChild(bubble);
+        });
+        // A page no receipt claims is out of the bundle, exactly like one the
+        // user has crossed out, so it is shown the same way.
+        thumb.classList.toggle('unclaimed', !owners.length && !isIgnored(thumb));
+        thumb.classList.toggle('picked',
+          selecting >= 0 && !!receipts[selecting].pages[page]);
+      });
+
+      writeFields();
+      describe();
+    }
+
+    function writeFields() {
+      assignments.textContent = '';
+      receipts.forEach(function (receipt) {
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'pages::' + sourcePath + '::' + receipt.rid;
+        input.dataset.rid = receipt.rid;
+        input.value = pagesOf(receipt).join(',');
+        assignments.appendChild(input);
+      });
+      rowlist.value = receipts.map(function (r) { return r.rid; }).join(',');
+    }
+
+    function describe() {
+      if (selecting >= 0) {
+        var picked = pagesOf(receipts[selecting]);
+        status.textContent = 'Selecting receipt ' + (selecting + 1) + ' — ' +
+          (picked.length
+            ? picked.length + ' page' + (picked.length === 1 ? '' : 's') + ' so far'
+            : 'click the pages that make it up');
+      } else if (!multi.checked) {
+        status.textContent = 'The whole document is one receipt.';
+      } else {
+        // Crossed-out pages are not counted here: they are already marked, and
+        // leaving them out is the whole point of crossing them out.
+        var left = thumbs.filter(function (thumb) {
+          return thumb.classList.contains('unclaimed');
+        }).length;
+        status.textContent = receipts.length + ' receipt' +
+          (receipts.length === 1 ? '' : 's') +
+          (left ? ' — ' + left + ' page' + (left === 1 ? '' : 's') + ' in no receipt' : '');
+      }
+
+      doneBtn.hidden = selecting < 0;
+      addBtn.hidden = selecting >= 0 || !multi.checked;
+      resetBtn.hidden = !multi.checked;
+      addBtn.textContent = '+ Add receipt ' + (receipts.length + 1);
+      hint.hidden = !multi.checked;
+    }
+
+    // ---- selecting -------------------------------------------------------
+
+    function setPage(page, wanted) {
+      if (selecting < 0) return;
+      if (wanted) receipts[selecting].pages[page] = true;
+      else delete receipts[selecting].pages[page];
+    }
+
+    var anchor = 0, adding = true, dragging = false;
+
+    function sweep(to) {
+      var low = Math.min(anchor, to), high = Math.max(anchor, to);
+      for (var page = low; page <= high; page++) setPage(page, adding);
+      paint();
+    }
+
+    function pageUnder(e) {
+      var el = document.elementFromPoint(e.clientX, e.clientY);
+      var thumb = el && el.closest ? el.closest('.pagethumb') : null;
+      return thumb && card.contains(thumb) ? parseInt(thumb.dataset.page, 10) : 0;
+    }
+
+    thumbs.forEach(function (thumb) {
+      var page = parseInt(thumb.dataset.page, 10);
+
+      thumb.addEventListener('pointerdown', function (e) {
+        if (selecting < 0 || e.button !== 0) return;
+        if (e.target.closest('.thumbbtn')) return;  // the tools are not selection
+        e.preventDefault();  // no text selection, no image drag
+        anchor = page;
+        adding = !receipts[selecting].pages[page];
+        dragging = true;
+        setPage(page, adding);
+        paint();
+      });
+
+      var open = function () {
+        Viewer.open(sourcePath, pageNumbers(), page, refreshThumb);
+      };
+      thumb.querySelector('img').addEventListener('click', function () {
+        // While a receipt is being assembled the page is a thing you pick, not
+        // a thing you read; the magnifier still opens it either way.
+        if (selecting < 0) open();
+      });
+      thumb.querySelector('.expandbtn').addEventListener('click', open);
+
+      thumb.querySelector('.rotatebtn').addEventListener('click', function (e) {
+        var btn = e.currentTarget;
+        btn.disabled = true;
+        Viewer.rotate(sourcePath, page)
+          .then(function () { refreshThumb(page); })
+          .finally(function () { btn.disabled = false; });
+      });
+
+      thumb.querySelector('.ignorebtn').addEventListener('click', function (e) {
+        var btn = e.currentTarget;
+        btn.disabled = true;
+        Viewer.setIgnored(sourcePath, page)
+          .then(function (data) {
+            thumb.classList.toggle('ignored', data.ignored);
+            btn.setAttribute('aria-pressed', data.ignored ? 'true' : 'false');
+            btn.title = data.ignored
+              ? 'Put page ' + page + ' back into the claim'
+              : 'Leave page ' + page + ' out of the claim';
+            paint();
+          })
+          .finally(function () { btn.disabled = false; });
+      });
+    });
+
+    // Tracked on the document so a drag survives leaving the strip, and so it
+    // ends wherever the pointer is let go.
+    document.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      var page = pageUnder(e);
+      if (page) sweep(page);
+    });
+    document.addEventListener('pointerup', function () { dragging = false; });
+    document.addEventListener('pointercancel', function () { dragging = false; });
+
+    // ---- the bar ---------------------------------------------------------
+
+    function startReceipt() {
+      receipts.push({rid: 'new' + (newCounter++), pages: {}});
+      selecting = receipts.length - 1;
+      paint();
+    }
+
+    function finishReceipt() {
+      // An empty receipt was a change of mind, not a receipt.
+      if (selecting >= 0 && !pagesOf(receipts[selecting]).length) {
+        receipts.splice(selecting, 1);
+      }
+      selecting = -1;
+      paint();
+    }
+
+    function resetToOne() {
+      receipts = [{rid: 'new' + (newCounter++), pages: allPages()}];
+      selecting = -1;
+      multi.checked = false;
+      paint();
+    }
+
+    /* Cutting the document up again mints new receipts, so an amount already
+       entered against an old one - and the statement line matched to it - goes
+       with it. Worth one question; worth asking it only once. */
+    function agreedToStartOver() {
+      if (!carried.length) return true;
+      if (!window.confirm(
+            'Start this document over? The amounts already entered for ' +
+            carried.join(' and ') + ' will be cleared.')) {
+        return false;
+      }
+      carried = [];
+      return true;
+    }
+
+    multi.addEventListener('change', function () {
+      var wanted = multi.checked;
+      if (!agreedToStartOver()) {
+        multi.checked = !wanted;
+        return;
+      }
+      if (wanted) {
+        receipts = [];
+        startReceipt();
+      } else {
+        resetToOne();
+      }
+    });
+
+    doneBtn.addEventListener('click', finishReceipt);
+    addBtn.addEventListener('click', startReceipt);
+    resetBtn.addEventListener('click', function () {
+      if (agreedToStartOver()) resetToOne();
+    });
+
+    // Continuing to the next step means the receipt in hand is finished.
+    card.closest('form').addEventListener('submit', function () {
+      if (selecting >= 0) finishReceipt();
+    });
+
+    // ---- helpers shared with the viewer ----------------------------------
+
+    function pageNumbers() {
+      return thumbs.map(function (t) { return parseInt(t.dataset.page, 10); });
+    }
+
+    function refreshThumb(page) {
+      var img = card.querySelector('.pagethumb[data-page="' + page + '"] img');
+      if (img) img.src = Viewer.docPageUrl(sourcePath, page, 150, true);
+    }
+
+    // A document arrives split when it was split on an earlier visit.
+    multi.checked = receipts.length > 1 ||
+      (receipts.length === 1 && pagesOf(receipts[0]).length < pageCount);
+    paint();
+  });
+})();
+</script>
+{% endblock %}

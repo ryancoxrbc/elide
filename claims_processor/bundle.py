@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pymupdf
 
-from .models import ClaimItem, Match, Source, format_amount
+from .models import ClaimItem, Match, Source, format_amount, page_label, pages_of
 
 A4 = pymupdf.paper_rect("a4")
 MARGIN = 36.0
@@ -109,8 +109,9 @@ def _place_item(out: pymupdf.Document, item: ClaimItem, source: Source, root: Pa
     """Scale a claim item's own page range onto A4 portrait.
 
     Rotation is looked up per page rather than per document, since a scanned
-    batch routinely comes out with some pages sideways and others not. A page
-    belongs to one receipt only, so it is placed here exactly once.
+    batch routinely comes out with some pages sideways and others not. Pages
+    the user marked as ignored are skipped, so a blank reverse side inside a
+    receipt's range never reaches the bundle.
     """
     path = root / item.source
     if not path.exists():
@@ -118,7 +119,7 @@ def _place_item(out: pymupdf.Document, item: ClaimItem, source: Source, root: Pa
 
     added = 0
     with pymupdf.open(path) as src:
-        for page_number in item.pages:
+        for page_number in pages_of(item, source):
             index = page_number - 1
             if not 0 <= index < len(src):
                 continue
@@ -282,7 +283,8 @@ def _draw_index(out: pymupdf.Document, entries: list[BundleEntry], claim_name: s
         label = item.label or Path(item.source).stem
         # Several receipts can come out of one PDF, so the filename alone does
         # not identify a row - the page range is what tells them apart.
-        document = f"{label}\n{Path(item.source).name}  ({item.page_label})"
+        where = page_label(pages_of(item, entry.source))
+        document = f"{label}\n{Path(item.source).name}  ({where})"
         detail, colour = _match_cell(match)
 
         cells = [

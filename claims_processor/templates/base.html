@@ -11,7 +11,8 @@
   <div class="brand">Claims Processor</div>
   <nav class="steps">
     {% set current = step | default(0) %}
-    {% for n, name, ep in [(1,'Documents','index'), (2,'Amounts','receipts'), (3,'Confirm','match'), (4,'Preview','preview'), (5,'Build','build')] %}
+    {% for n, name, ep in [(1,'Documents','index'), (2,'Receipts','split'), (3,'Amounts','amounts'),
+                           (4,'Confirm','match'), (5,'Preview','preview'), (6,'Build','build')] %}
       <a class="stepitem {% if n == current %}on{% elif n < current %}done{% endif %}"
          href="{{ url_for(ep) }}"><span class="num">{{ n }}</span>{{ name }}</a>
     {% endfor %}
@@ -20,6 +21,12 @@
 <main>
 {% block body %}{% endblock %}
 </main>
+<script>
+  /* Held open for as long as this page is on screen. The server counts these
+     and stops when the last window closes, so shutting the wizard also ends
+     the terminal run it came from - see lifetime.py. */
+  window.RunStream = new EventSource("{{ url_for('alive') }}");
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

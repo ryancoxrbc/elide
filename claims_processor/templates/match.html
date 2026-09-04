@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% set step = 3 %}
+{% set step = 4 %}
 {% block body %}
 <h1>Confirm the matching statement line</h1>
 <p class="lede">Nothing is auto-accepted. Even where only one line matches, you confirm it &mdash;
@@ -15,7 +15,7 @@ statements routinely carry repeated amounts.</p>
     </div>
     <div class="options">
       {% if not g.amount %}
-        <p class="warn">No amount entered — <a href="{{ url_for('receipts') }}">go back and add one</a>.
+        <p class="warn">No amount entered — <a href="{{ url_for('amounts') }}">go back and add one</a>.
         This receipt will be included in the bundle but not tied to a statement line.</p>
       {% elif g.candidates %}
         {% for c in g.candidates %}
@@ -47,7 +47,7 @@ statements routinely carry repeated amounts.</p>
   </section>
 {% endfor %}
   <div class="actions">
-    <a class="ghost" href="{{ url_for('receipts') }}">&larr; Back</a>
+    <a class="ghost" href="{{ url_for('amounts') }}">&larr; Back</a>
     <button type="submit">Preview the redaction &rarr;</button>
   </div>
 </form>
