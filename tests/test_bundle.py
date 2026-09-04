@@ -133,3 +133,51 @@ def test_rotation_is_looked_up_per_page(statement_pdf, tmp_path):
         include_index=False,
     )
     assert summary["receipt_pages"] == 2  # both item pages placed despite differing rotation
+
+
+def _ink_centre(pix):
+    """Centre of mass of the dark pixels in a pixmap (x, y as 0..1 fractions)."""
+    sx = sy = n = 0
+    for y in range(pix.height):
+        for x in range(pix.width):
+            if sum(pix.pixel(x, y)[:3]) < 384:  # noticeably darker than white
+                sx += x
+                sy += y
+                n += 1
+    assert n, "expected some ink on the page"
+    return sx / n / pix.width, sy / n / pix.height
+
+
+def test_bundle_rotation_matches_web_preview(statement_pdf, tmp_path):
+    """A rotated receipt page turns the same way in the bundle as in the browser."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=300, height=400)
+    page.insert_text((20, 30), "MARK", fontsize=24)  # ink in the top-left corner
+    receipt = tmp_path / "receipt.pdf"
+    doc.save(receipt)
+    doc.close()
+
+    source = Source(path=receipt.name, page_count=1, rotations={"1": 90})
+    item = ClaimItem(source=source.path, first_page=1, last_page=1, amount="1.00")
+    out = tmp_path / "bundle.pdf"
+    build_bundle(
+        out,
+        redacted_statement=statement_pdf,
+        entries=[BundleEntry(item, source, None)],
+        claim_folder=tmp_path,
+        include_index=False,
+    )
+
+    web = pymupdf.open(receipt)
+    web[0].set_rotation((web[0].rotation + source.rotation_of(1)) % 360)
+    web_x, web_y = _ink_centre(web[0].get_pixmap(dpi=40))
+    web.close()
+
+    bundle = pymupdf.open(out)
+    bundle_x, bundle_y = _ink_centre(bundle[len(bundle) - 1].get_pixmap(dpi=40))
+    bundle.close()
+
+    # The bundle must turn the page the same way as the browser preview, so the
+    # mark lands in the same half of the page for both renderers.
+    assert (web_x < 0.5) == (bundle_x < 0.5)
+    assert (web_y < 0.5) == (bundle_y < 0.5)

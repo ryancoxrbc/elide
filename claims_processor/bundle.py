@@ -119,7 +119,11 @@ def _place_item(out: pymupdf.Document, item: ClaimItem, source: Source, root: Pa
                 frame.x0 + (frame.width - draw_w) / 2 + draw_w,
                 frame.y0 + (frame.height - draw_h) / 2 + draw_h,
             )
-            page.show_pdf_page(target, src, index, rotate=rotation)
+            # Stored rotations are anticlockwise (see Source.rotate_anticlockwise),
+            # matching Page.set_rotation used by the browser preview. show_pdf_page's
+            # rotate argument turns the other way, so negate it to keep the bundle
+            # consistent with what the web app shows.
+            page.show_pdf_page(target, src, index, rotate=-rotation)
             added += 1
     return added
 
