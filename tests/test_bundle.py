@@ -1,7 +1,7 @@
 import pymupdf
 
-from claims_processor.bundle import BundleEntry, build_bundle
-from claims_processor.models import ClaimItem, Match, Source
+from elide.bundle import BundleEntry, build_bundle
+from elide.models import ClaimItem, Match, Source
 
 
 def test_bundle_contains_index_statement_and_receipts(statement_pdf, receipt_pdf, tmp_path):

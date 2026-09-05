@@ -6,8 +6,8 @@ that closed.  Ending it is a signal and a hard exit, so what is tested here is
 the decision rather than the act.
 """
 
-import claims_processor.lifetime as lifetime
-from claims_processor.lifetime import Lifetime
+import elide.lifetime as lifetime
+from elide.lifetime import Lifetime
 
 
 def open_window(life: Lifetime):

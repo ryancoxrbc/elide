@@ -2,9 +2,9 @@ from decimal import Decimal
 
 import pytest
 
-from claims_processor.matching import find_candidates, suggest_amounts
-from claims_processor.models import parse_amount
-from claims_processor.statement import parse_statement
+from elide.matching import find_candidates, suggest_amounts
+from elide.models import parse_amount
+from elide.statement import parse_statement
 
 
 @pytest.mark.parametrize(

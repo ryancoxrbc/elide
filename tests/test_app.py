@@ -8,8 +8,8 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
-from claims_processor.app import STATE, app
-from claims_processor.project import ClaimProject
+from elide.app import STATE, app
+from elide.project import ClaimProject
 
 
 @pytest.fixture
@@ -298,7 +298,7 @@ def test_deleting_every_row_leaves_the_source_with_no_items(client, claim_folder
 
 
 def test_open_ui_uses_the_omarchy_web_app_launcher_when_present(monkeypatch):
-    from claims_processor import app as app_module
+    from elide import app as app_module
 
     calls = {}
     monkeypatch.setattr(app_module.shutil, "which", lambda name: "/usr/bin/omarchy")
@@ -316,7 +316,7 @@ def test_open_ui_uses_the_omarchy_web_app_launcher_when_present(monkeypatch):
 
 
 def test_open_ui_falls_back_to_the_default_browser_without_omarchy(monkeypatch):
-    from claims_processor import app as app_module
+    from elide import app as app_module
 
     opened = []
     monkeypatch.setattr(app_module.shutil, "which", lambda name: None)

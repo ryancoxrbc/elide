@@ -97,7 +97,7 @@ def build_bundle(
     out.set_metadata(
         {
             "title": f"Claim bundle - {Path(claim_folder).name}",
-            "producer": "claims_processor",
+            "producer": "elide",
         }
     )
     out.save(str(dest), garbage=4, deflate=True)

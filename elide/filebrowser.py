@@ -19,7 +19,7 @@ from .project import OUTPUT_DIR, PROJECT_FILE
 # guarantee, and folders past the cap simply show no count.
 PDF_PROBE_LIMIT = 60
 
-RECENT_FILE = Path.home() / ".config" / "claims_processor" / "recent.json"
+RECENT_FILE = Path.home() / ".config" / "elide" / "recent.json"
 RECENT_MAX = 8
 
 # Dialog tools in order of preference. zenity and qarma are GTK/Qt equivalents.

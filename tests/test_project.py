@@ -9,8 +9,8 @@ import json
 import pymupdf
 import pytest
 
-from claims_processor.models import ClaimItem, Match, Source
-from claims_processor.project import ClaimProject
+from elide.models import ClaimItem, Match, Source
+from elide.project import ClaimProject
 
 
 @pytest.fixture

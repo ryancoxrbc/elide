@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from claims_processor.statement import parse_statement, transaction_rows
+from elide.statement import parse_statement, transaction_rows
 
 
 def test_rows_and_columns_are_located(statement_pdf):
@@ -41,7 +41,7 @@ def test_statement_is_guessed_from_content_not_page_count(tmp_path):
     """A long invoice must not outrank a short statement."""
     import pymupdf
 
-    from claims_processor.project import discover_pdfs, guess_statement
+    from elide.project import discover_pdfs, guess_statement
 
     long_invoice = pymupdf.open()
     for _ in range(6):
@@ -64,7 +64,7 @@ def test_statement_is_guessed_from_content_not_page_count(tmp_path):
 def test_an_obvious_filename_still_wins(tmp_path):
     import pymupdf
 
-    from claims_processor.project import discover_pdfs, guess_statement
+    from elide.project import discover_pdfs, guess_statement
 
     for name in ("CertifiedStatements.pdf", "invoice.pdf"):
         doc = pymupdf.open()

@@ -6,8 +6,8 @@ import subprocess
 
 import pytest
 
-from claims_processor import filebrowser
-from claims_processor.filebrowser import list_dir, pick_folder_natively
+from elide import filebrowser
+from elide.filebrowser import list_dir, pick_folder_natively
 
 
 @pytest.fixture

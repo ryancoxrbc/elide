@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the Claims Processor against a claim folder.
+# Launch the Elide against a claim folder.
 #   ./run.sh                  # uses the current directory
 #   ./run.sh /path/to/claim   # uses that folder
 set -euo pipefail
@@ -24,4 +24,4 @@ fi
 # The claim folder is the working directory, so point Python at the package.
 export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
 
-exec "$VENV/bin/python" -m claims_processor.app "$FOLDER" "$@"
+exec "$VENV/bin/python" -m elide.app "$FOLDER" "$@"

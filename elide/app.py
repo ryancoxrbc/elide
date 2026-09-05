@@ -538,7 +538,7 @@ def _open_ui(url: str) -> None:
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Claims Processor")
+    parser = argparse.ArgumentParser(description="Elide")
     parser.add_argument("folder", nargs="?", default=str(Path.cwd()))
     parser.add_argument("--port", type=int, default=57311)
     parser.add_argument("--no-browser", action="store_true")
@@ -547,7 +547,7 @@ def main() -> None:
     app.config["START_FOLDER"] = str(Path(args.folder).expanduser().resolve())
     url = f"http://127.0.0.1:{args.port}/"
     print(
-        f"\n  Claims Processor\n  claim folder : {app.config['START_FOLDER']}"
+        f"\n  Elide\n  claim folder : {app.config['START_FOLDER']}"
         f"\n  open         : {url}\n  stop         : close the window, or Ctrl-C\n",
         flush=True,
     )

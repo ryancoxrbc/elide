@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from claims_processor.build import run_build
-from claims_processor.models import ClaimItem, Source
-from claims_processor.project import OUTPUT_DIR, ClaimProject, discover_pdfs
+from elide.build import run_build
+from elide.models import ClaimItem, Source
+from elide.project import OUTPUT_DIR, ClaimProject, discover_pdfs
 
 
 def _project(statement_pdf, receipt_pdf) -> ClaimProject:

@@ -1,4 +1,4 @@
-# Claims Processor
+# Elide
 
 Turns a folder of receipts plus a certified bank statement into **one PDF** you can submit,
 with every unrelated transaction and every account balance permanently removed from the
@@ -12,7 +12,7 @@ text, working search, no flattening to images.
 
 This was built against one bank's certified-statement layout: South African, `R` currency,
 comma decimals, a running **Balance** column, an FSP-registered footer. The statement parsing
-in `claims_processor/statement.py`, the statement-detection scoring in `project.py`, and the
+in `elide/statement.py`, the statement-detection scoring in `project.py`, and the
 amount spellings in `models.py` all encode assumptions about that format. A statement from a
 different bank — or a different kind of source document — will likely need those adjusted, and
 the redaction policy in `redact.py` tuned to what *your* claim needs to hide and keep.
@@ -26,9 +26,9 @@ check — rather than something to run unchanged.
 ## Running it
 
 ```bash
-~/Work/claims_processor/run.sh                     # start in the current directory
-~/Work/claims_processor/run.sh /path/to/claim      # start somewhere specific
-~/Work/claims_processor/run.sh --port 9000         # flags work without a folder
+~/Work/elide/run.sh                     # start in the current directory
+~/Work/elide/run.sh /path/to/claim      # start somewhere specific
+~/Work/elide/run.sh --port 9000         # flags work without a folder
 ```
 
 You do not need to know the path up front — the first screen is a folder browser. First run

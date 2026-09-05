@@ -4,10 +4,10 @@ from decimal import Decimal
 
 import pytest
 
-from claims_processor.matching import find_candidates
-from claims_processor.redact import RedactionError, apply_plan, build_plan, check_plan
-from claims_processor.statement import parse_statement
-from claims_processor.verify import extract_text, verify
+from elide.matching import find_candidates
+from elide.redact import RedactionError, apply_plan, build_plan, check_plan
+from elide.statement import parse_statement
+from elide.verify import extract_text, verify
 
 
 def _plan_for(statement_pdf, amounts):
@@ -27,7 +27,7 @@ def test_geometry_check_passes_on_a_clean_plan(statement_pdf):
 
 def test_geometry_check_catches_a_bar_that_would_clip_a_kept_row(statement_pdf):
     """Fattening the bars until they bleed must be refused, not silently applied."""
-    import claims_processor.redact as redact
+    import elide.redact as redact
 
     pages, kept, _ = _plan_for(statement_pdf, ["1322.98"])
     original = redact.ROW_PAD_Y
@@ -124,8 +124,8 @@ def test_a_receipt_sharing_a_removed_date_is_not_a_false_leak(statement_pdf, tmp
     """
     import pymupdf
 
-    from claims_processor.bundle import BundleEntry, build_bundle
-    from claims_processor.models import ClaimItem, Source
+    from elide.bundle import BundleEntry, build_bundle
+    from elide.models import ClaimItem, Source
 
     pages, kept, plan = _plan_for(statement_pdf, ["1322.98"])
     redacted = tmp_path / "redacted.pdf"
